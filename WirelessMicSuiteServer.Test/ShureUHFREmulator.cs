@@ -17,6 +17,8 @@ internal class ShureUHFREmulator : IDisposable
     private readonly Socket socket;
     private readonly Task serverRxTask;
     private readonly Task serverTxTask;
+    private readonly Task meterTask1;
+    private readonly Task meterTask2;
     private readonly Decoder decoder;
     private readonly Encoder encoder;
     private readonly byte[] buffer;
@@ -24,6 +26,7 @@ internal class ShureUHFREmulator : IDisposable
     private readonly CancellationToken shouldQuit;
     private readonly CancellationTokenSource shouldQuitSource;
     private readonly Pipe txPipe;
+    private readonly Random random;
 
     private UHFRProperties props;
 
@@ -35,6 +38,7 @@ internal class ShureUHFREmulator : IDisposable
         txPipe = new();
         shouldQuitSource = new();
         shouldQuit = shouldQuitSource.Token;
+        random = new();
 
         props = new();
 
@@ -47,6 +51,8 @@ internal class ShureUHFREmulator : IDisposable
         Log($"Starting ShureUHFR Emulator on port {port}...");
         serverRxTask = Task.Run(ServerRxTask);
         serverTxTask = Task.Run(ServerTxTask);
+        meterTask1 = Task.Run(() => MeterTask(0));
+        meterTask2 = Task.Run(() => MeterTask(1));
     }
 
     private static void Log(object message, LogSeverity severity = LogSeverity.Info, [CallerMemberName] string? caller = null)
@@ -141,7 +147,7 @@ internal class ShureUHFREmulator : IDisposable
             int cmdEnd = str.IndexOf(' ');
             var cmd = cmdEnd == -1 ? str : str[..cmdEnd];
             str = str[cmdEnd..];
-            ParseCommand(type, receiver, cmd, str, fullMsg);
+            ParseCommand(type, receiver-1, cmd, str, fullMsg);
         }
     }
 
@@ -157,13 +163,13 @@ internal class ShureUHFREmulator : IDisposable
                 }
                 else if (type == CommandType.SET)
                 {
-                    if (args.Length < 13)
+                    if (args.Length < 12)
                     {
                         CommandError(fullMsg);
                         break;
                     }
 
-                    var name = args[1..13];
+                    var name = args[..13];
                     props.channelName[receiver] = name.ToString().PadLeft(12);
                     Report(receiver, cmd, props.channelName[receiver]);
                     break;
@@ -363,7 +369,7 @@ internal class ShureUHFREmulator : IDisposable
 
     private void Report(int channel, ReadOnlySpan<char> cmd, string msg)
     {
-        Reply($"* REPORT {channel} {cmd} {msg} *");
+        Reply($"* REPORT {channel+1} {cmd} {msg} *");
     }
 
     private void ReportMeter(int channel)
@@ -381,6 +387,54 @@ internal class ShureUHFREmulator : IDisposable
         var dst = txPipe.Writer.GetSpan(encoder.GetByteCount(message, true));
         int written = encoder.GetBytes(message, dst, true);
         txPipe.Writer.Advance(written);
+    }
+
+    private void MeterTask(int channel)
+    {
+        while (!shouldQuit.IsCancellationRequested)
+        {
+            int meterTime = props.meter[channel];
+            // If metering is disabled or if the metering time > 12 seconds, just wait...
+            if (meterTime < 0 || meterTime >= 400)
+            {
+                Thread.Sleep(100);
+                continue;
+            }
+
+            int rnd = random.Next();
+            string rfLevelA = (random.Next(7)) switch
+            {
+                0 => "020",
+                1 => "070",
+                2 => "075",
+                3 => "080",
+                4 => "085",
+                5 => "090",
+                6 => "100",
+                _ => "100"
+            };
+            string rfLevelB = (random.Next(7)) switch
+            {
+                0 => "020",
+                1 => "070",
+                2 => "075",
+                3 => "080",
+                4 => "085",
+                5 => "090",
+                6 => "100",
+                _ => "100"
+            };
+            int b = props.batt[channel];
+
+            Reply($"* SAMPLE {channel + 1} ALL " +
+                $"{((rnd&1) != 0 ? 'X' : 'A')}{((rnd & 2) != 0 ? 'X' : 'B')}" +
+                $"{rfLevelA} {rfLevelB}" +
+                $"{(b < 1 ? 'U' : b)}" +
+                $"{(rnd >> 2) & 0xff}" +
+                $" *");
+
+            Thread.Sleep(meterTime * 30);
+        }
     }
 
     private async Task ServerTxTask()
