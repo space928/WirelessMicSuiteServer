@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 
@@ -14,7 +16,16 @@ internal class Program
         var assembly = Assembly.GetExecutingAssembly();
         Log($"Version: {assembly.GetName().Version}; {FileVersionInfo.GetVersionInfo(assembly.Location).LegalCopyright}");
 
-        ShureUHFREmulator shureEmu = new(2202);
+        Log("List network interfaces: ");
+        List<IPAddress> addresses = [];
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            var nicAddr = nic.GetIPProperties().UnicastAddresses.Select(x => x.Address);
+            addresses.AddRange(nicAddr);
+            Log($"\t{nic.Name}: {string.Join(", ", nicAddr)}");
+        }
+
+        ShureUHFREmulator shureEmu = new(addresses, 2202);
 
         while (true)
         {
@@ -24,7 +35,10 @@ internal class Program
 
     public static void Log(object message, LogSeverity severity = LogSeverity.Info, [CallerMemberName] string? caller = null, string? className = "Main")
     {
-        Console.WriteLine($"[{DateTime.Now:T}] [{className}] [{caller}] {message}");
+        lock (logLock)
+        {
+            Console.WriteLine($"[{DateTime.Now:T}] [{severity}] [{className}] [{caller}] {message}");
+        }
     }
 }
 

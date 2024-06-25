@@ -30,7 +30,7 @@ internal class ShureUHFREmulator : IDisposable
 
     private UHFRProperties props;
 
-    public ShureUHFREmulator(int port)
+    public ShureUHFREmulator(IEnumerable<IPAddress> localEndpoints, int port)
     {
         Encoding encoding = Encoding.ASCII;
         buffer = new byte[MaxUDPSize];
@@ -43,12 +43,23 @@ internal class ShureUHFREmulator : IDisposable
         props = new();
 
         socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        socket.Bind(new IPEndPoint(IPAddress.Any, port));
+        IPAddress? boundIp = null;
+        foreach (var ip in localEndpoints)
+        {
+            try
+            {
+                socket.Bind(new IPEndPoint(ip, port));
+                boundIp = ip;
+            }
+            catch { }
+        }
+        if (boundIp == null)
+            throw new ArgumentException("Couldn't bind to any of the provided IP endpoints.");
 
         decoder = encoding.GetDecoder();
         encoder = encoding.GetEncoder();
 
-        Log($"Starting ShureUHFR Emulator on port {port}...");
+        Log($"Starting ShureUHF-R Emulator on {boundIp}:{port}...");
         serverRxTask = Task.Run(ServerRxTask);
         serverTxTask = Task.Run(ServerTxTask);
         meterTask1 = Task.Run(() => MeterTask(0));
