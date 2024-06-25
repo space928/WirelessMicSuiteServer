@@ -5,17 +5,15 @@ namespace WirelessMicSuiteServer;
 
 public class WirelessMicManager : IDisposable
 {
-    private bool shouldQuit;
-    //private readonly Dictionary<IPAddress, IWirelessMicReceiver> receivers;
     private readonly List<IWirelessMicReceiverManager> receiverManagers;
 
     public IEnumerable<IWirelessMicReceiver> Receivers => receiverManagers.SelectMany(x=>x.Receivers);
+    // TODO: There's a race condition where if receivers get added or removed while this is being enumerated an exception is thrown.
     public IEnumerable<IWirelessMic> WirelessMics => new WirelessMicEnumerator(Receivers);
 
     public WirelessMicManager(IEnumerable<IWirelessMicReceiverManager>? receiverManagers)
     {
         this.receiverManagers = receiverManagers?.ToList() ?? [];
-        //receivers = [];
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<WirelessMicManager>();
@@ -26,9 +24,30 @@ public class WirelessMicManager : IDisposable
 
     public void Dispose()
     {
-        shouldQuit = true;
         foreach (var man in receiverManagers)
             man.Dispose();
+    }
+
+    public IWirelessMicReceiver? TryGetWirelessMicReceiver(uint uid)
+    {
+        foreach (var manager in receiverManagers)
+        {
+            var r = manager.TryGetWirelessMicReceiver(uid);
+            if (r != null)
+                return r;
+        }
+        return null;
+    }
+
+    public IWirelessMic? TryGetWirelessMic(uint uid)
+    {
+        foreach (var manager in receiverManagers)
+        {
+            var r = manager.TryGetWirelessMic(uid);
+            if (r != null)
+                return r;
+        }
+        return null;
     }
 
     private struct WirelessMicEnumerator : IEnumerable<IWirelessMic>, IEnumerator<IWirelessMic>, IEnumerator

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -19,6 +19,8 @@ public class Program
         Log($"Version: {assembly.GetName().Version}; {copyright}");
 
         WirelessMicManager micManager = new([new ShureUHFRManager()]);
+        if (args.Contains("-m"))
+            Task.Run(() => MeterTask(micManager));
         StartWebServer(args, micManager);
     }
 
@@ -56,6 +58,74 @@ public class Program
     public static void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
+    }
+
+    private static void MeterTask(WirelessMicManager manager)
+    {
+        while (true)
+        {
+            // This code is very racey, no good way to lock the console logger though...
+            int i = 0;
+            int leftPos = Console.BufferWidth - 8 - 1;
+            int sl = Console.CursorLeft;
+            int st = Console.CursorTop;
+            try
+            {
+                foreach (var mic in manager.WirelessMics)
+                {
+                    MeteringData data = mic.LastMeterData ?? default;
+                    DrawMeter(leftPos, 0, i, data);
+
+                    i++;
+                    leftPos -= 8;
+                }
+            }
+            catch { }
+            Console.CursorLeft = sl;
+            Console.CursorTop = st;
+
+            Thread.Sleep(20);
+        }
+    }
+
+    /*
+     * ┌──────┐
+     * │ ║║ ║ │
+     * │ ║║ ║ │
+     * │ ║║ ║ │
+     * │ ║║ ║ │
+     * │ ║║ ║ │
+     * │ AB L │
+     * │ 02_S │
+     * └──────┘
+     */
+    private static void DrawMeter(int left, int top, int index, MeteringData sample)
+    {
+        //int width = 8;
+        //int height = 8;
+
+        Console.CursorLeft = left;
+        Console.CursorTop = top;
+        Console.Write("┌──────┐");
+        Console.CursorTop++;
+        Console.CursorLeft = left;
+        int meterHeight = 10;
+        for (int i = meterHeight-1; i >= 0; i--)
+        {
+            char a = sample.rssiA * (meterHeight - 0.5) > i ? '║' : ' ';
+            char b = sample.rssiB * (meterHeight - 0.5) > i ? '║' : ' ';
+            char l = Math.Sqrt(sample.audioLevel) * (meterHeight - 0.5) > i ? '║' : ' ';
+            Console.Write($"│ {a}{b} {l} │");
+            Console.CursorTop++;
+            Console.CursorLeft = left;
+        }
+        Console.Write("│ AB L │");
+        Console.CursorTop++;
+        Console.CursorLeft = left;
+        Console.Write($"│ {index,4} │");
+        Console.CursorTop++;
+        Console.CursorLeft = left;
+        Console.Write("└──────┘");
     }
 
     /*public static void Log(object? message, LogSeverity severity = LogSeverity.Info, [CallerMemberName] string? caller = null, string? className = "Main")

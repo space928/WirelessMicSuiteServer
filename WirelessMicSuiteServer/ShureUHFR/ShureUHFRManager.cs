@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -31,6 +30,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     private readonly CancellationToken cancellationToken;
     private readonly CancellationTokenSource cancellationTokenSource;
     private readonly Dictionary<uint, ShureUHFRReceiver> receiversDict;
+    private readonly Dictionary<uint, ShureWirelessMic> micsDict;
     private readonly ConcurrentQueue<ByteMessage> txPipe;
     private readonly SemaphoreSlim txAvailableSem;
 
@@ -43,6 +43,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     {
         Receivers = [];
         receiversDict = [];
+        micsDict = [];
         cancellationTokenSource = new();
         cancellationToken = cancellationTokenSource.Token;
         txPipe = new();
@@ -69,9 +70,35 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         logger.Log(message, severity);
     }
 
-    private uint ComputeReceiverUID(uint snetID)
+    public IWirelessMicReceiver? TryGetWirelessMicReceiver(uint uid)
     {
-        return unchecked((uint)HashCode.Combine(snetID, typeof(ShureUHFRReceiver)));
+        if (receiversDict.TryGetValue(uid, out var receiver))
+            return receiver;
+        return null;
+    }
+
+    public IWirelessMic? TryGetWirelessMic(uint uid)
+    {
+        if (micsDict.TryGetValue(uid, out var mic))
+            return mic;
+        return null;
+    }
+
+    internal static uint CombineHash(uint a, uint b)
+    {
+        unchecked
+        {
+            uint hash = 17;
+            hash = hash * 31 + a;
+            hash = hash * 31 + b;
+            return hash;
+        }
+    }
+
+    private static uint ComputeReceiverUID(uint snetID)
+    {
+        var typeHash = typeof(ShureUHFRReceiver).GUID.GetHashCode();
+        return CombineHash(snetID, unchecked((uint)typeHash));
     }
 
     private void RXTask()
@@ -122,7 +149,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
 
             int charsRead = decoder.GetChars(buffer, ShureSNetHeader.HEADER_SIZE, read-ShureSNetHeader.HEADER_SIZE, charBuffer, 0);
             Span<char> str = charBuffer.AsSpan()[..charsRead];
-            Log($"Received: '{str}'", LogSeverity.Info);
+            Log($"Received: '{str}'", LogSeverity.Debug);
 
             if(receiversDict.TryGetValue(uid, out var rec))
                 rec.Receive(str, header);
@@ -161,11 +188,13 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
                 {
                     foreach (var rem in toRemove)
                     {
-                        if (receiversDict.Remove(rem, out var rec))
+                        if (receiversDict.TryGetValue(rem, out var rec))
                         {
-                            Log($"[Discovery] Receiver 0x{rec.UID:X} has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
                             Receivers.Remove(rec);
+                            rec.Dispose();
+                            Log($"[Discovery] Receiver 0x{rec.UID:X} has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
                         }
+                        receiversDict.Remove(rem);
                     }
                     toRemove.Clear();
                 }
@@ -182,6 +211,16 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         txAvailableSem.Release();
     }
 
+    internal void RegisterWirelessMic(ShureWirelessMic mic)
+    {
+        micsDict.Add(mic.UID, mic);
+    }
+
+    internal void UnregisterWirelessMic(ShureWirelessMic mic)
+    {
+        micsDict.Remove(mic.UID);
+    }
+
     public void Dispose()
     {
         cancellationTokenSource.Cancel();
@@ -192,6 +231,17 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         //discoveryTask.Wait(1000);
         //discoveryTask.Dispose();
     }
+}
+
+enum ShureCommandType
+{
+    GET,
+    SET,
+    METER,
+    REPORT,
+    SAMPLE,
+    NOTE,
+    NOTED
 }
 
 public readonly record struct ShureSNetHeader
@@ -269,25 +319,5 @@ public readonly record struct ShureSNetHeader
     {
         Discovery = 1,
         Message = 3
-    }
-}
-
-public readonly struct ByteMessage : IDisposable
-{
-    public readonly IPEndPoint endPoint;
-    public readonly ArraySegment<byte> Buffer => new(buffer, 0, length);
-    private readonly byte[] buffer;
-    private readonly int length;
-
-    public ByteMessage(IPEndPoint endPoint, int size)
-    {
-        this.endPoint = endPoint;
-        this.length = size;
-        this.buffer = ArrayPool<byte>.Shared.Rent(size);
-    }
-
-    public void Dispose()
-    {
-        ArrayPool<byte>.Shared.Return(buffer);
     }
 }
