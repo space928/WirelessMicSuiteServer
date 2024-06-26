@@ -113,7 +113,7 @@ public class ShureWirelessMic : IWirelessMic
 
     private void SendStartupCommands()
     {
-        receiver.Send($"* METER {receiverNo} ALL 1 *");
+        receiver.Send($"* METER {receiverNo} ALL {receiver.Manager.PollingPeriodMS / 30} *");
         receiver.Send($"* UPDATE {receiverNo} ADD *");
 
         receiver.Send($"* GET {receiverNo} CHAN_NAME *");

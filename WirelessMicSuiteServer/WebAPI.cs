@@ -1,44 +1,89 @@
-﻿using System;
+﻿using Microsoft.OpenApi.Models;
+using System;
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text;
 
 namespace WirelessMicSuiteServer;
 
 public static class WebAPI
 {
+    public static void AddSwaggerGen(IServiceCollection services)
+    {
+        services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Version = "v1",
+                Title = "Wireless Mic Suite API",
+                Description = "An API for interfacing with wireless microphone receivers.",
+                Contact = new OpenApiContact
+                {
+                    Name = "Thomas Mathieson",
+                    Email = "thomas@mathieson.dev",
+                    Url = new Uri("https://github.com/space928/WirelessMicSuiteServer/issues")
+                },
+                License = new OpenApiLicense
+                {
+                    Name = "GPLv3",
+                    Url = new Uri("https://github.com/space928/WirelessMicSuiteServer/blob/main/LICENSE.txt")
+                },
+            });
+
+            // using System.Reflection;
+            var xmlFilename = Path.Combine(AppContext.BaseDirectory, $"{Assembly.GetExecutingAssembly().GetName().Name}.xml");
+            if (File.Exists(xmlFilename))
+                c.IncludeXmlComments(xmlFilename);
+
+            c.MapType<IPv4Address>(() => new OpenApiSchema { Type = "string" });
+            c.MapType<MACAddress>(() => new OpenApiSchema { Type = "string" });
+        });
+    }
+
     public static void AddWebRoots(WebApplication app, WirelessMicManager micManager)
     {
+        #region Getters
         app.MapGet("/getWirelessReceivers", (HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             return micManager.Receivers.Select(x => new WirelessReceiverData(x));
         }).WithName("GetWirelessReceivers")
+        //.WithGroupName("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMics", (HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             return micManager.WirelessMics.Select(x => new WirelessMicData(x));
         }).WithName("GetWirelessMics")
+        //.WithGroupName("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMicReceiver/{uid}", (uint uid, HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             var rec = micManager.TryGetWirelessMicReceiver(uid);
             if (rec == null)
                 return new WirelessReceiverData?();
             return new WirelessReceiverData(rec);
-        }).WithName("getWirelessMicReceiver")
+        }).WithName("GetWirelessMicReceiver")
+        //.WithGroupName("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMic/{uid}", (uint uid, HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             var mic = micManager.TryGetWirelessMic(uid);
             if (mic == null)
                 return new WirelessMicData?();
             return new WirelessMicData(mic);
         }).WithName("GetWirelessMic")
+        //.WithGroupName("Getters")
         .WithOpenApi();
 
         app.MapGet("/getMicMeter/{uid}", (uint uid, HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             var mic = micManager.TryGetWirelessMic(uid);
             if (mic == null || mic.MeterData == null)
                 return null;
@@ -49,10 +94,12 @@ public static class WebAPI
 
             return samples;
         }).WithName("GetMicMeter")
+        //.WithGroupName("Getters")
         .WithOpenApi();
 
         app.MapGet("/getMicMeterAscii/{uid}", (uint uid, HttpContext ctx) =>
         {
+            SetAPIHeaderOptions(ctx);
             var mic = micManager.TryGetWirelessMic(uid);
             if (mic == null || mic.MeterData == null)
                 return "";
@@ -75,6 +122,182 @@ public static class WebAPI
 
             return sb.ToString();
         }).WithName("GetMicMeterAscii")
+        //.WithGroupName("Getters")
         .WithOpenApi();
+        #endregion
+
+        #region Setters
+        var receiverProps = typeof(IWirelessMicReceiver).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.SetProperty);
+        Dictionary<string, PropertyInfo> receiverSetters = new(
+            receiverProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name, x))
+            .Concat(receiverProps.Select(x => new KeyValuePair<string, PropertyInfo>(CamelCase(x.Name), x)))
+            );
+        app.MapGet("/setWirelessMicReceiver/{uid}/{param}/{value}", (uint uid, string param, string value, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var mic = micManager.TryGetWirelessMicReceiver(uid);
+            if (mic == null)
+                return new APIResult(false, $"Couldn't find wireless mic with UID 0x{uid:X}!");
+
+            if (!receiverSetters.TryGetValue(param, out var prop))
+                return new APIResult(false, $"Property '{param}' does not exist!");
+
+            try
+            {
+                var val = DeserializeSimpleType(value, prop.PropertyType);
+                prop.SetValue(mic, val);
+            }
+            catch (Exception ex)
+            {
+                return new APIResult(false, ex.Message);
+            }
+
+            return new APIResult(true);
+        }).WithName("SetWirelessMicReceiver")
+        .WithDescription("Sets a named property to the given value on an IWirelessMicReceiver. See IWirelessMicReceiver for the full list of supported properties.")
+        //.WithGroupName("Setters")
+        .WithOpenApi();
+
+        var micProps = typeof(IWirelessMic).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.SetProperty);
+        Dictionary<string, PropertyInfo> micSetters = new(
+            micProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name, x))
+            .Concat(micProps.Select(x => new KeyValuePair<string, PropertyInfo>(CamelCase(x.Name), x)))
+            );
+        app.MapGet("/setWirelessMic/{uid}/{param}/{value}", (uint uid, string param, string value, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var mic = micManager.TryGetWirelessMic(uid);
+            if (mic == null)
+                return new APIResult(false, $"Couldn't find wireless mic with UID 0x{uid:X}!");
+
+            if (!micSetters.TryGetValue(param, out var prop))
+                return new APIResult(false, $"Property '{param}' does not exist!");
+
+            try
+            {
+                var val = DeserializeSimpleType(value, prop.PropertyType);
+                prop.SetValue(mic, val);
+            } catch (Exception ex)
+            {
+                return new APIResult(false, ex.Message);
+            }
+
+            return new APIResult(true);
+        }).WithName("SetWirelessMic")
+        .WithDescription("Sets a named property to the given value on an IWirelessMic. See IWirelessMic for the full list of supported properties.")
+        //.WithGroupName("Setters")
+        .WithOpenApi();
+        #endregion
+    }
+
+    private static void SetAPIHeaderOptions(HttpContext ctx)
+    {
+        ctx.Response.Headers.AccessControlAllowOrigin = "*";
+        ctx.Response.Headers.CacheControl = "no-store";
+    }
+
+    private static string CamelCase(string str)
+    {
+        if (string.IsNullOrEmpty(str)) 
+            return str;
+        char l = char.ToLowerInvariant(str[0]);
+        return $"{l}{str[1..]}";
+    }
+
+    private static bool IsSimple(Type type)
+    {
+        return type.IsPrimitive
+          || type.IsEnum
+          || type.Equals(typeof(string))
+          || type.Equals(typeof(decimal));
+    }
+
+    private static readonly ConcurrentDictionary<Type, ConstructorInfo> stringConstructors = [];
+    public static object? DeserializeSimpleType(string valueStr, Type targetType)
+    {
+        if (Nullable.GetUnderlyingType(targetType) is Type nullableType)
+        {
+            if (valueStr == "null")
+                return null;
+            else
+                targetType = nullableType;
+        }
+
+        if (!IsSimple(targetType))
+        {
+            if (!stringConstructors.TryGetValue(targetType, out var strConstructor))
+            {
+                var str = targetType.GetConstructor([typeof(string)]);
+                if (str != null)
+                    strConstructor = str;
+                else
+                    throw new ArgumentException($"Couldn't find a suitable constructor for {targetType.FullName} which takes a single string as a parameter!");
+                stringConstructors.TryAdd(targetType, strConstructor);
+            }
+
+            return strConstructor.Invoke([valueStr]);
+        }
+
+        var simpleType = targetType;
+        if (targetType.IsEnum)
+            simpleType = targetType.GetEnumUnderlyingType();
+        object? value;
+
+        try
+        {
+            if (simpleType == typeof(bool))
+                value = int.Parse(valueStr) != 0;
+            else if (simpleType == typeof(byte))
+                value = byte.Parse(valueStr);
+            else if (simpleType == typeof(sbyte))
+                value = sbyte.Parse(valueStr);
+            else if (simpleType == typeof(char))
+                value = valueStr[0];//char.Parse(line);
+            else if (simpleType == typeof(decimal))
+                value = decimal.Parse(valueStr);
+            else if (simpleType == typeof(double))
+                value = double.Parse(valueStr);
+            else if (simpleType == typeof(float))
+                value = float.Parse(valueStr);
+            else if (simpleType == typeof(int))
+                value = int.Parse(valueStr);
+            else if (simpleType == typeof(uint))
+                value = uint.Parse(valueStr);
+            else if (simpleType == typeof(nint))
+                value = nint.Parse(valueStr);
+            else if (simpleType == typeof(long))
+                value = long.Parse(valueStr);
+            else if (simpleType == typeof(ulong))
+                value = ulong.Parse(valueStr);
+            else if (simpleType == typeof(short))
+                value = short.Parse(valueStr);
+            else if (simpleType == typeof(ushort))
+                value = ushort.Parse(valueStr);
+            else if (simpleType == typeof(string))
+                value = new string(valueStr);
+            else
+                throw new ArgumentException($"Fields of type {targetType.Name} are not supported!");
+        }
+        catch (Exception ex) when (ex is FormatException or OverflowException)
+        {
+            throw new ArgumentException($"Value of '{valueStr}' couldn't be parsed as a {targetType.Name}!");
+        }
+
+        if (targetType.IsEnum)
+            value = Enum.ToObject(targetType, value);
+
+        return value;
+    }
+
+    /// <summary>
+    /// Represents the result of an API operation.
+    /// </summary>
+    /// <param name="success">Whether the operation succeeded.</param>
+    /// <param name="message">Optionally, an error message if it failed.</param>
+    [Serializable]
+    public readonly struct APIResult(bool success, string? message = null)
+    {
+        public readonly bool Success { get; init; } = success;
+        public readonly string? Message { get; init; } = message;
     }
 }

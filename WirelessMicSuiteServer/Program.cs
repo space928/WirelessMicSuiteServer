@@ -13,15 +13,31 @@ public class Program
 
     public static void Main(string[] args)
     {
+        var cli = CreateCommandLineArgs(args);
+
         Log("Starting Wireless Mic Suite server...");
         var assembly = Assembly.GetExecutingAssembly();
         string? copyright = string.IsNullOrEmpty(assembly.Location) ? "Copyright Thomas Mathieson 2024" : FileVersionInfo.GetVersionInfo(assembly.Location).LegalCopyright;
         Log($"Version: {assembly.GetName().Version}; {copyright}");
 
-        WirelessMicManager micManager = new([new ShureUHFRManager()]);
-        if (args.Contains("-m"))
+        int meterInterval = 50;
+        if (cli.ParsedArgs.TryGetValue("--meter-interval", out object? arg))
+            meterInterval = (int)(uint)arg!;
+
+        WirelessMicManager micManager = new([
+            new ShureUHFRManager() { PollingPeriodMS = meterInterval }
+        ]);
+        if (cli.ParsedArgs.ContainsKey("--meters"))
             Task.Run(() => MeterTask(micManager));
         StartWebServer(args, micManager);
+    }
+
+    private static CommandLineOptions CreateCommandLineArgs(string[] args)
+    {
+        return new CommandLineOptions([
+            new("--meters", "-m", help: "Displays ASCII-art meters in the terminal for the connected wireless mics. Don't use this in production."),
+            new("--meter-interval", "-i", argType: CommandLineArgType.Uint, help:"Sets the interval at which metering information should be polled from the wireless receivers. This is specified in milli-seconds.")
+        ], args);
     }
 
     private static void StartWebServer(string[] args, WirelessMicManager micManager)
@@ -35,7 +51,7 @@ public class Program
 
         // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
         builder.Services.AddEndpointsApiExplorer();
-        builder.Services.AddSwaggerGen();
+        WebAPI.AddSwaggerGen(builder.Services);
 
         var app = builder.Build();
 

@@ -159,9 +159,13 @@ public interface IWirelessMic : INotifyPropertyChanged
 /// <param name="audioLevel"></param>
 public struct MeteringData(float rssiA, float rssiB, float audioLevel)
 {
-    [JsonInclude] public float rssiA = rssiA;
-    [JsonInclude] public float rssiB = rssiB;
-    [JsonInclude] public float audioLevel = audioLevel;
+    [JsonIgnore] public float rssiA = rssiA;
+    [JsonIgnore] public float rssiB = rssiB;
+    [JsonIgnore] public float audioLevel = audioLevel;
+
+    public readonly float RssiA => rssiA;
+    public readonly float RssiB => rssiB;
+    public readonly float AudioLevel => audioLevel;
 }
 
 /// <summary>
@@ -228,16 +232,21 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
     }
 }
 
+/// <summary>
+/// A frequency range in Hz.
+/// </summary>
+/// <param name="startFreq">The lower bound of the tunable frequency range in Hz.</param>
+/// <param name="endFreq">The upper bound of the tunable frequency range in Hz.</param>
 public struct FrequencyRange(ulong startFreq, ulong endFreq)
 {
     /// <summary>
     /// The lower bound of the tunable frequency range in Hz.
     /// </summary>
-    [JsonInclude] public ulong startFrequency = startFreq;
+    [JsonInclude] public ulong StartFrequency { get; set; } = startFreq;
     /// <summary>
     /// The upper bound of the tunable frequency range in Hz.
     /// </summary>
-    [JsonInclude] public ulong endFrequency = endFreq;
+    [JsonInclude] public ulong EndFrequency { get; set; } = endFreq;
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<IPMode>))]
@@ -247,6 +256,9 @@ public enum IPMode
     Manual
 }
 
+/// <summary>
+/// Represents an IPv4 address.
+/// </summary>
 [StructLayout(LayoutKind.Explicit)]
 [JsonConverter(typeof(JsonStringConverter<IPv4Address>))]
 public struct IPv4Address
@@ -281,6 +293,10 @@ public struct IPv4Address
             throw new ArgumentException($"Failed to convert IP address '{address}' to IPv4Address!");
     }
 
+    /// <inheritdoc cref="IPv4Address(ReadOnlySpan{char})"/>
+    [JsonConstructor]
+    public IPv4Address(string str) : this(str.AsSpan()) { }
+
     /// <summary>
     /// Parse an IPv4 address in the form 'aaa.bbb.ccc.ddd'.
     /// </summary>
@@ -306,6 +322,9 @@ public struct IPv4Address
     }
 }
 
+/// <summary>
+/// Represents a MAC address.
+/// </summary>
 [StructLayout(LayoutKind.Explicit)]
 [JsonConverter(typeof(JsonStringConverter<MACAddress>))]
 public struct MACAddress
@@ -333,6 +352,10 @@ public struct MACAddress
         this.e = e;
         this.f = f;
     }
+
+    /// <inheritdoc cref="MACAddress(ReadOnlySpan{char})"/>
+    [JsonConstructor]
+    public MACAddress(string str) : this(str.AsSpan()) { }
 
     /// <summary>
     /// Parse a MAC address in the form 'aa:bb:cc:dd:ee:ff'.

@@ -25,9 +25,7 @@ public class JsonStringConverter<T> : JsonConverterFactory where T : new()
     public sealed override JsonConverter? CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
         if (typeToConvert != typeof(T))
-        {
             throw new ArgumentOutOfRangeException();
-        }
 
         return new StringConverter<T>();
     }
@@ -40,10 +38,10 @@ public class StringConverter<T> : JsonConverter<T> where T : new()
     public StringConverter()
     {
         var str = typeof(T).GetConstructor([typeof(string)]);
-        var spn = typeof(T).GetConstructor([typeof(ReadOnlySpan<char>)]);
-        if (spn != null)
-            strConstructor = spn;
-        else if (str != null)
+        //var spn = typeof(T).GetConstructor([typeof(ReadOnlySpan<char>)]);
+        //if (spn != null)
+        //    strConstructor = spn;
+        /*else*/ if (str != null)
             strConstructor = str;
         else
             throw new ArgumentException("Target type must have a constructor which takes a single string as a parameter!");

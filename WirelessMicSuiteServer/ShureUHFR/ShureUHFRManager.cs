@@ -17,7 +17,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     private const int UdpPortPrivate = 2201;
     private const int MaxUDPSize = 0x10000;
     internal const uint ManagerSnetID = 0x6A05ADAD;
-    private const int ReceiverDisconnectTimeout = 2000;
+    private const int ReceiverDisconnectTimeout = 5000;
 
     private readonly Socket socket;
     private readonly Task rxTask;
@@ -133,16 +133,19 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
                 var epIp = (IPEndPoint)ep;
                 epIp.Port = UdpPortPrivate;
 
-                if (receiversDict.TryGetValue(uid, out var receiver))
+                lock (receiversDict)
                 {
-                    receiver.LastPingTime = DateTime.UtcNow;
-                }
-                else
-                {
-                    Log($"[Discovery] Found Shure Receiver @ {epIp} UID=0x{uid:X}", LogSeverity.Info);
-                    receiver = new ShureUHFRReceiver(this, epIp, uid, header.snetIDFrom);
-                    receiversDict.Add(uid, receiver);
-                    Receivers.Add(receiver);
+                    if (receiversDict.TryGetValue(uid, out var receiver))
+                    {
+                        receiver.LastPingTime = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        Log($"[Discovery] Found Shure Receiver @ {epIp} UID=0x{uid:X}", LogSeverity.Info);
+                        receiver = new ShureUHFRReceiver(this, epIp, uid, header.snetIDFrom);
+                        receiversDict.Add(uid, receiver);
+                        Receivers.Add(receiver);
+                    }
                 }
                 continue;
             }

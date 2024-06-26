@@ -23,6 +23,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     private IPMode? ipMode;
     private MACAddress? macAddress;
 
+    public ShureUHFRManager Manager => manager;
     public IPEndPoint Address { get; init; }
     public DateTime LastPingTime { get; set; }
     public int NumberOfChannels => mics.Length;
