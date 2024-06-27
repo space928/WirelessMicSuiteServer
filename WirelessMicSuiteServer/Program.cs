@@ -27,9 +27,10 @@ public class Program
         WirelessMicManager micManager = new([
             new ShureUHFRManager() { PollingPeriodMS = meterInterval }
         ]);
+        WebSocketAPIManager wsAPIManager = new(micManager, meterInterval);
         if (cli.ParsedArgs.ContainsKey("--meters"))
             Task.Run(() => MeterTask(micManager));
-        StartWebServer(args, micManager);
+        StartWebServer(args, micManager, wsAPIManager);
     }
 
     private static CommandLineOptions CreateCommandLineArgs(string[] args)
@@ -40,7 +41,7 @@ public class Program
         ], args);
     }
 
-    private static void StartWebServer(string[] args, WirelessMicManager micManager)
+    private static void StartWebServer(string[] args, WirelessMicManager micManager, WebSocketAPIManager wsAPIManager)
     {
         var builder = WebApplication.CreateBuilder(args);
         //builder.Logging.ClearProviders();
@@ -66,7 +67,14 @@ public class Program
 
         app.UseAuthorization();
 
-        WebAPI.AddWebRoots(app, micManager);
+        var webSocketOptions = new WebSocketOptions
+        {
+            KeepAliveInterval = TimeSpan.FromMinutes(2)
+        };
+
+        app.UseWebSockets(webSocketOptions);
+
+        WebAPI.AddWebRoots(app, micManager, wsAPIManager);
 
         app.Run();
     }

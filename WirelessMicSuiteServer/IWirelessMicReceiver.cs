@@ -88,7 +88,7 @@ public interface IWirelessMicReceiver : IDisposable, INotifyPropertyChanged
     /// <summary>
     /// The MAC address of the wireless receiver.
     /// </summary>
-    public abstract MACAddress? MACAddres { get; }
+    public abstract MACAddress? MACAddress { get; }
 }
 
 public interface IWirelessMic : INotifyPropertyChanged
@@ -102,6 +102,7 @@ public interface IWirelessMic : INotifyPropertyChanged
     /// </summary>
     public abstract ConcurrentQueue<MeteringData>? MeterData { get; }
     public abstract MeteringData? LastMeterData { get; }
+    public abstract RFScanData RFScanData { get; }
 
     /// <summary>
     /// A unique identifier for this wireless transmitter. Note that this is associated with the 
@@ -149,6 +150,14 @@ public interface IWirelessMic : INotifyPropertyChanged
     //public void Unsubscribe();
     public void StartMetering(int periodMS);
     public void StopMetering();
+
+    /// <summary>
+    /// Starts scanning the RF spectrum using this receiver. Audio is muted while this task is executing.
+    /// </summary>
+    /// <param name="range">The frequency range to scan, must be within the frequency range supported by the receiver.</param>
+    /// <param name="stepSize">If supported, the step size in Hz between each RF sample.</param>
+    /// <returns>A data structure containing the results of the scan.</returns>
+    public Task<RFScanData> StartRFScan(FrequencyRange range, ulong stepSize);
 }
 
 /// <summary>
@@ -190,7 +199,7 @@ public struct WirelessReceiverData(IWirelessMicReceiver other) : IWirelessMicRec
     public IPv4Address? Subnet { get; set; } = other.Subnet;
     public IPv4Address? Gateway { get; set; } = other.Gateway;
     public IPMode? IPMode { get; set; } = other.IPMode;
-    public MACAddress? MACAddres { get; init; } = other.MACAddres;
+    public MACAddress? MACAddress { get; init; } = other.MACAddress;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -205,6 +214,7 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
 {
     [JsonIgnore] public IWirelessMicReceiver Receiver { get; init; } = other.Receiver;
     [JsonIgnore] public ConcurrentQueue<MeteringData>? MeterData { get; init; } = other.MeterData;
+    [JsonIgnore] public RFScanData RFScanData { get; init; } = other.RFScanData;
     [JsonInclude] public MeteringData? LastMeterData { get; init; } = other.LastMeterData;
 
     [JsonInclude] public readonly uint ReceiverID => Receiver.UID;
@@ -226,9 +236,67 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
         throw new NotImplementedException();
     }
 
+    public Task<RFScanData> StartRFScan(FrequencyRange range, ulong stepSize)
+    {
+        throw new NotImplementedException();
+    }
+
     public void StopMetering()
     {
         throw new NotImplementedException();
+    }
+}
+
+/// <summary>
+/// The data resulting from an RF spectrum scan.
+/// </summary>
+public struct RFScanData
+{
+    /// <summary>
+    /// The recorded RF level samples at each sampled frequency.
+    /// </summary>
+    public List<Sample> Samples { get; internal set; }
+    /// <summary>
+    /// The frequency range covered by the scan.
+    /// </summary>
+    public FrequencyRange FrequencyRange { get; internal set; }
+    /// <summary>
+    /// The distance between RF samples in Hz.
+    /// </summary>
+    public ulong StepSize { get; internal set; }
+    /// <summary>
+    /// The percentage completion of the RF scan operation.
+    /// </summary>
+    public float Progress { get; internal set; }
+    /// <summary>
+    /// The current state of the RF scan operation.
+    /// </summary>
+    public Status State { get; internal set; }
+
+    /// <summary>
+    /// An RF spectrum sample.
+    /// </summary>
+    /// <param name="freq">The frequency of the sample in Hz.</param>
+    /// <param name="strength">The strength of the sample in dBm.</param>
+    public readonly struct Sample(ulong freq, float strength)
+    {
+        /// <summary>
+        /// The frequency of the sample in Hz.
+        /// </summary>
+        public readonly ulong Frequency { get; init; } = freq;
+        /// <summary>
+        /// The strength of the sample in dBm.
+        /// </summary>
+        public readonly float Strength { get; init; } = strength;
+    }
+
+    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
+    public enum Status
+    {
+        Started,
+        Running,
+        Completed,
+        Failure
     }
 }
 
@@ -242,11 +310,11 @@ public struct FrequencyRange(ulong startFreq, ulong endFreq)
     /// <summary>
     /// The lower bound of the tunable frequency range in Hz.
     /// </summary>
-    [JsonInclude] public ulong StartFrequency { get; set; } = startFreq;
+    public ulong StartFrequency { get; set; } = startFreq;
     /// <summary>
     /// The upper bound of the tunable frequency range in Hz.
     /// </summary>
-    [JsonInclude] public ulong EndFrequency { get; set; } = endFreq;
+    public ulong EndFrequency { get; set; } = endFreq;
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<IPMode>))]

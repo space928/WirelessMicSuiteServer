@@ -9,6 +9,10 @@ public class ShureWirelessMic : IWirelessMic
     private readonly ShureUHFRReceiver receiver;
     private readonly int receiverNo;
     private readonly ConcurrentQueue<MeteringData> meterData;
+    private readonly ConcurrentQueue<(string cmd, string args)> scanCommands;
+    private readonly SemaphoreSlim scanCommandsSem;
+    private RFScanData rfScanData;
+    private Task<RFScanData>? rfScanInProgress;
     private MeteringData? lastMeterData;
 
     private readonly uint uid;
@@ -25,6 +29,7 @@ public class ShureWirelessMic : IWirelessMic
     public IWirelessMicReceiver Receiver => receiver;
     public ConcurrentQueue<MeteringData> MeterData => meterData;
     public MeteringData? LastMeterData => lastMeterData;
+    public RFScanData RFScanData => rfScanData;
 
     public uint UID => uid;
     public string? Name 
@@ -33,8 +38,8 @@ public class ShureWirelessMic : IWirelessMic
         set 
         {
             if (value != null && value.Length < 12)
-                SetAsync("CHAN_NAME", value); 
-        } 
+                SetAsync("CHAN_NAME", value.Replace(' ', '_')); 
+        }
     }
     public int? Gain 
     { 
@@ -107,6 +112,9 @@ public class ShureWirelessMic : IWirelessMic
         this.uid = uid;
         this.receiverNo = receiverNo;
         meterData = [];
+        rfScanInProgress = null;
+        scanCommands = [];
+        scanCommandsSem = new(1);
 
         SendStartupCommands();
     }
@@ -163,6 +171,17 @@ public class ShureWirelessMic : IWirelessMic
             ParseSampleCommand(args, fullMsg);
             return;
         }
+        else if (type == ShureCommandType.SCAN)
+        {
+            scanCommands.Enqueue((cmd.ToString(), args.ToString()));
+            scanCommandsSem.Release();
+            return;
+        }
+        else if(type == ShureCommandType.RFLEVEL)
+        {
+            ParseRFLevelCommand(cmd, args, fullMsg);
+            return;
+        }
         else if (type != ShureCommandType.REPORT && type != ShureCommandType.NOTE)
         {
             CommandError(fullMsg, $"Unexpected command type '{type}'.");
@@ -171,7 +190,7 @@ public class ShureWirelessMic : IWirelessMic
         switch (cmd)
         {
             case "CHAN_NAME":
-                name = args.ToString();
+                name = args.ToString().Replace('_', ' ');
                 OnPropertyChanged(nameof(Name));
                 break;
             case "MUTE":
@@ -199,9 +218,9 @@ public class ShureWirelessMic : IWirelessMic
                 break;
             case "TX_GAIN":
             case "TX_IR_GAIN":
-                if (int.TryParse(args, out int ngain) && ngain is >= -10 and <= 20)
+                if (int.TryParse(args, out int ngain) && ngain is >= 0 and <= 30)
                 {
-                    gain = ngain;
+                    gain = ngain - 10;
                     OnPropertyChanged(nameof(Gain));
                 } 
                 else if (args.SequenceEqual("UNKNOWN"))
@@ -215,6 +234,7 @@ public class ShureWirelessMic : IWirelessMic
             case "SQUELCH":
                 if (int.TryParse(args, out int nsquelch))
                 {
+                    // In the range 0-20 -> -10-10
                     //outputGain = -ngain;
                     //OnPropertyChanged(nameof(OutputGain));
                 }
@@ -351,6 +371,39 @@ public class ShureWirelessMic : IWirelessMic
         lastMeterData = meter;
     }
 
+    private void ParseRFLevelCommand(ReadOnlySpan<char> nargs, ReadOnlySpan<char> args, ReadOnlySpan<char> fullMsg)
+    {
+        // "* RFLEVEL n 10 578000 100 578025 100 578050 100 578075 100 578100 100 578125 100 578150 100 578175 100 578200 100 578225 100 *"
+        //  * RFLEVEL n numSamples [freq level]... *
+        // level: is in - dBm
+        Span<Range> splits = stackalloc Range[32];
+        int nSplits = args.Split(splits, ' ');
+        splits = splits[..nSplits];
+
+        if (!byte.TryParse(nargs, out byte n))
+        {
+            CommandError(fullMsg, "Couldn't parse number of RF level samples.");
+            return;
+        }
+        if (nSplits != n * 2)
+        {
+            CommandError(fullMsg, "Unexpected number of RF level samples.");
+            return;
+        }
+
+        for (int i = 0; i < n*2; i+=2)
+        {
+            if (!uint.TryParse(args[splits[i]], out uint freq) || !uint.TryParse(args[splits[i+1]], out uint rf))
+            {
+                CommandError(fullMsg, $"Couldn't parse RF level sample {i/2}.");
+                return;
+            }
+            rfScanData.Samples.Add(new(freq*1000, -(float)rf));
+        }
+
+        rfScanData.Progress = rfScanData.Samples.Count / (float)((rfScanData.FrequencyRange.EndFrequency - rfScanData.FrequencyRange.StartFrequency) / rfScanData.StepSize + 1);
+    }
+
     private void CommandError(ReadOnlySpan<char> str, string? details = null)
     {
         if (details != null)
@@ -361,5 +414,74 @@ public class ShureWirelessMic : IWirelessMic
         {
             Log($"Error while parsing command '{str}'", LogSeverity.Warning);
         }
+    }
+
+    public Task<RFScanData> StartRFScan(FrequencyRange range, ulong stepSize)
+    {
+        if (rfScanInProgress != null && !rfScanInProgress.IsCompleted)
+            return rfScanInProgress;
+
+        var startTime = DateTime.UtcNow;
+        var timeout = TimeSpan.FromSeconds(180);
+        return rfScanInProgress = Task.Run(() =>
+        {
+            rfScanData.State = RFScanData.Status.Running;
+            rfScanData.Progress = 0;
+            rfScanData.FrequencyRange = range;
+            rfScanData.StepSize = stepSize;
+            rfScanData.Samples = [];
+
+            receiver.Send($"* METER {receiverNo} ALL 400 *");
+            receiver.Send($"* SCAN RESERVE {receiverNo} xyz *");
+            // Wait for "* SCAN RESERVED n xyz *"
+            // Wait for "* SCAN RESERVE n ACK xyz *"
+            while (DateTime.UtcNow - startTime < timeout)
+            {
+                (string cmd, string args) cmd;
+                while (!scanCommands.TryDequeue(out cmd))
+                    scanCommandsSem.Wait(200);
+                if (cmd.cmd == "RESERVE" && cmd.args == "ACK xyz")
+                    break;
+            }
+            // Default step size is 25KHz
+            receiver.Send($"* SCAN RANGE {receiverNo} {stepSize/1000} {range.StartFrequency/1000} {range.EndFrequency/1000} *");
+            // Wait for "* SCAN STARTED n *"
+            // Wait for "* RFLEVEL n 10 578000 100 578025 100 578050 100 578075 100 578100 100 578125 100 578150 100 578175 100 578200 100 578225 100 *"
+            //           * RFLEVEL n numSamples [freq level]... *
+            // level: is in - dBm
+            // Wait for "* SCAN DONE n *"
+            while (DateTime.UtcNow - startTime < timeout)
+            {
+                (string cmd, string args) cmd;
+                while (!scanCommands.TryDequeue(out cmd))
+                    scanCommandsSem.Wait(200);
+                if (cmd.cmd == "DONE")
+                    break;
+            }
+            receiver.Send($"* SCAN RELEASE {receiverNo} *");
+            
+            // Wait for "* SCAN RELEASED n *"
+            // Wait for "* SCAN IDLE n *"
+            while (DateTime.UtcNow - startTime < timeout)
+            {
+                (string cmd, string args) cmd;
+                while (!scanCommands.TryDequeue(out cmd))
+                {
+                    receiver.Send($"* SCAN RELEASE {receiverNo} *");
+                    scanCommandsSem.Wait(200);
+                }
+                if (cmd.cmd == "RELEASED")
+                    break;
+            }
+            scanCommands.Clear();
+            for (int i = 0; i < scanCommandsSem.CurrentCount; i++)
+                scanCommandsSem.Wait(1);
+            // Start metering again
+            SendStartupCommands();
+
+            rfScanData.State = RFScanData.Status.Completed;
+
+            return rfScanData;
+        });
     }
 }

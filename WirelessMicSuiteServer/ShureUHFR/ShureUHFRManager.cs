@@ -167,6 +167,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
             while (!txPipe.TryDequeue(out msg))
                 txAvailableSem.Wait(1000);
             socket.SendTo(msg.Buffer, msg.endPoint);
+            msg.Dispose();
             /*var msg = await txPipe.Reader.ReadAsync(cancellationToken);
             foreach (var part in msg.Buffer)
                 await socket.SendAsync(part);*/
@@ -209,7 +210,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     internal void SendMessage(ByteMessage message)
     {
         if (message.endPoint.Address == IPAddress.Any)
-            throw new ArgumentException();
+            throw new ArgumentException($"Specified message endpoint is IPAddress.Any, this is probably not intentional...");
         txPipe.Enqueue(message);
         txAvailableSem.Release();
     }
@@ -244,7 +245,9 @@ enum ShureCommandType
     REPORT,
     SAMPLE,
     NOTE,
-    NOTED
+    NOTED,
+    SCAN,
+    RFLEVEL
 }
 
 public readonly record struct ShureSNetHeader

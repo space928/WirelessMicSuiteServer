@@ -80,7 +80,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
             }
         }
     }
-    public MACAddress? MACAddres => macAddress;
+    public MACAddress? MACAddress => macAddress;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -202,6 +202,16 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
             // This is just an acknowledgement of the UPDATE command, we can safely ignore it...
             return;
         }
+        else if (msg.StartsWith("RFLEVEL"))
+        {
+            type = ShureCommandType.RFLEVEL;
+            msg = msg[7..];
+        }
+        else if (msg.StartsWith("SCAN"))
+        {
+            type = ShureCommandType.SCAN;
+            msg = msg[4..];
+        }
         else
         {
             Log($"Unknown command type '{msg.ToString().Split(' ')[0]}'", LogSeverity.Warning);
@@ -221,9 +231,19 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
             msg = msg[noteEnd..];
         }
 
+        ReadOnlySpan<char> cmd = msg;
+        if (type == ShureCommandType.SCAN)
+        {
+            // Next is the command itself
+            msg = msg[1..];
+            int scmdEnd = msg.IndexOf(' ');
+            cmd = scmdEnd == -1 ? msg : msg[..scmdEnd];
+            msg = msg[scmdEnd..];
+        }
+
         // This is followed by 1 or 2 for the receiver number
         int receiver;
-        if (msg.Length < 3)
+        if (msg.Length < 2)
         {
             Log($"Incomplete message, missing receiver number: '{fullMsg}'", LogSeverity.Warning);
             return;
@@ -242,12 +262,17 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
         {
             receiver = -1;
         }
-        msg = msg[1..];
+        if (msg.Length > 0)
+            msg = msg[1..];
 
-        // Next is the command itself
-        int cmdEnd = msg.IndexOf(' ');
-        var cmd = cmdEnd == -1 ? msg : msg[..cmdEnd];
-        msg = msg[(cmdEnd+1)..];
+        if (type != ShureCommandType.SCAN)
+        {
+            // Next is the command itself
+            int cmdEnd = msg.IndexOf(' ');
+            cmd = cmdEnd == -1 ? msg : msg[..cmdEnd];
+            msg = msg[(cmdEnd + 1)..];
+        }
+
         if (receiver == -1)
             ParseCommand(type, cmd, msg, fullMsg);
         else
@@ -319,7 +344,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
                 try
                 {
                     macAddress = new MACAddress(args);
-                    OnPropertyChanged(nameof(MACAddres));
+                    OnPropertyChanged(nameof(MACAddress));
                 } catch
                 {
                     CommandError(fullMsg, "Expected a MAC address in the form aa:bb:cc:dd:ee:ff!");

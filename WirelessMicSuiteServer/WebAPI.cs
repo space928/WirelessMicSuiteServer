@@ -37,10 +37,11 @@ public static class WebAPI
 
             c.MapType<IPv4Address>(() => new OpenApiSchema { Type = "string" });
             c.MapType<MACAddress>(() => new OpenApiSchema { Type = "string" });
+            //c.MapType<PropertyChangeNotification>(() => new OpenApiSchema {  });
         });
     }
 
-    public static void AddWebRoots(WebApplication app, WirelessMicManager micManager)
+    public static void AddWebRoots(WebApplication app, WirelessMicManager micManager, WebSocketAPIManager wsAPIManager)
     {
         #region Getters
         app.MapGet("/getWirelessReceivers", (HttpContext ctx) =>
@@ -124,14 +125,40 @@ public static class WebAPI
         }).WithName("GetMicMeterAscii")
         //.WithGroupName("Getters")
         .WithOpenApi();
+
+        app.MapGet("/rfScan/{uid}", (HttpContext ctx, uint uid, ulong? minFreq, ulong? maxFreq, ulong? stepSize = 25000) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var mic = micManager.TryGetWirelessMic(uid);
+            if (mic == null)
+                return (RFScanData?)null;
+
+            var scan = mic.RFScanData;
+            if (scan.State == RFScanData.Status.Running)
+            {
+                var scanCpy = scan;
+                scanCpy.Samples = [];
+                return scanCpy;
+            }
+            if (minFreq != null && maxFreq != null && stepSize != null)
+            {
+                mic.StartRFScan(new FrequencyRange(minFreq.Value, maxFreq.Value), stepSize.Value);
+                scan.FrequencyRange = new FrequencyRange(minFreq.Value, maxFreq.Value);
+                scan.StepSize = stepSize.Value;
+                scan.Samples = [];
+                scan.Progress = 0;
+                scan.State = RFScanData.Status.Started;
+            }
+
+            return scan;
+        }).WithName("RFScan")
+        //.WithGroupName("Getters")
+        .WithOpenApi();
         #endregion
 
         #region Setters
         var receiverProps = typeof(IWirelessMicReceiver).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.SetProperty);
-        Dictionary<string, PropertyInfo> receiverSetters = new(
-            receiverProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name, x))
-            .Concat(receiverProps.Select(x => new KeyValuePair<string, PropertyInfo>(CamelCase(x.Name), x)))
-            );
+        Dictionary<string, PropertyInfo> receiverSetters = new(receiverProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name.ToLowerInvariant(), x)));
         app.MapGet("/setWirelessMicReceiver/{uid}/{param}/{value}", (uint uid, string param, string value, HttpContext ctx) =>
         {
             SetAPIHeaderOptions(ctx);
@@ -139,7 +166,7 @@ public static class WebAPI
             if (mic == null)
                 return new APIResult(false, $"Couldn't find wireless mic with UID 0x{uid:X}!");
 
-            if (!receiverSetters.TryGetValue(param, out var prop))
+            if (!receiverSetters.TryGetValue(param.ToLowerInvariant(), out var prop))
                 return new APIResult(false, $"Property '{param}' does not exist!");
 
             try
@@ -159,10 +186,7 @@ public static class WebAPI
         .WithOpenApi();
 
         var micProps = typeof(IWirelessMic).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.SetProperty);
-        Dictionary<string, PropertyInfo> micSetters = new(
-            micProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name, x))
-            .Concat(micProps.Select(x => new KeyValuePair<string, PropertyInfo>(CamelCase(x.Name), x)))
-            );
+        Dictionary<string, PropertyInfo> micSetters = new(micProps.Select(x => new KeyValuePair<string, PropertyInfo>(x.Name.ToLowerInvariant(), x)));
         app.MapGet("/setWirelessMic/{uid}/{param}/{value}", (uint uid, string param, string value, HttpContext ctx) =>
         {
             SetAPIHeaderOptions(ctx);
@@ -170,7 +194,7 @@ public static class WebAPI
             if (mic == null)
                 return new APIResult(false, $"Couldn't find wireless mic with UID 0x{uid:X}!");
 
-            if (!micSetters.TryGetValue(param, out var prop))
+            if (!micSetters.TryGetValue(param.ToLowerInvariant(), out var prop))
                 return new APIResult(false, $"Property '{param}' does not exist!");
 
             try
@@ -188,6 +212,25 @@ public static class WebAPI
         //.WithGroupName("Setters")
         .WithOpenApi();
         #endregion
+
+        app.Map("/ws", async (HttpContext ctx) => 
+        {
+            if (!ctx.WebSockets.IsWebSocketRequest)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+            var socketFinishedTcs = new TaskCompletionSource();
+
+            using WebSocketAPI wsAPI = new(ws, socketFinishedTcs, wsAPIManager);
+
+            await socketFinishedTcs.Task;
+        }).WithName("OpenWebSocket")
+        .WithDescription("Opens a new WebSocket for receiving property change notifications and metering data.")
+        //.WithGroupName("Setters")
+        .WithOpenApi();
     }
 
     private static void SetAPIHeaderOptions(HttpContext ctx)
