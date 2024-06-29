@@ -6,6 +6,10 @@ A webapp for monitoring and controlling wireless microphone systems.
  - Aggregation of different wireless mic systems
  - Simple RESTful API
  - Cross-platform client and server support
+ - OpenAPI/Swagger support
+
+![image](https://github.com/space928/WirelessMicSuiteServer/assets/15130114/4226d498-9c7d-43dc-99ff-50c0278ec45f)
+
 
 ### Compatible Systems
  - Shure UHF-R series
