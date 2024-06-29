@@ -142,6 +142,7 @@ public class WebSocketAPIManager : IDisposable
     private readonly List<WebSocketAPI> clients;
     private readonly Timer meteringTimer;
     private bool isSendingMeteringMsg;
+    private readonly JsonSerializerOptions jsonSerializerOptions;
 
     public WebSocketAPIManager(WirelessMicManager micManager, int meterInterval)
     {
@@ -149,6 +150,13 @@ public class WebSocketAPIManager : IDisposable
         clients = [];
         propCache = [];
         BuildPropCache();
+
+        jsonSerializerOptions = new()
+        {
+            IncludeFields = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = false,
+        };
 
         ((INotifyCollectionChanged)micManager.Receivers).CollectionChanged += (o, e) =>
         {
@@ -205,6 +213,7 @@ public class WebSocketAPIManager : IDisposable
             foreach (var client in clients)
                 client.SendMessage(json);
         }
+        catch { }
         finally
         {
             isSendingMeteringMsg = false;
@@ -251,7 +260,7 @@ public class WebSocketAPIManager : IDisposable
         object? val = cached.prop.GetValue(target);
 
         var propNotif = new PropertyChangeNotification(cached.name, val, uid);
-        var json = JsonSerializer.SerializeToUtf8Bytes(propNotif);
+        var json = JsonSerializer.SerializeToUtf8Bytes(propNotif, jsonSerializerOptions);
 
         foreach (var client in clients)
             client.SendMessage(json);

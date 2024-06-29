@@ -18,11 +18,13 @@ public class ShureWirelessMic : IWirelessMic
     private readonly uint uid;
     private string? name;
     private int? gain;
+    private int? sensitivity;
     private int? outputGain;
     private bool? mute;
     private ulong? frequency;
     private int? group;
     private int? channel;
+    private LockMode? lockMode;
     private string? transmitterType;
     private float? batteryLevel;
 
@@ -46,17 +48,26 @@ public class ShureWirelessMic : IWirelessMic
         get => gain; 
         set 
         {
-            if (value != null && value >= 0 && value <= 32)
-                SetAsync("TX_IR_GAIN", value.Value.ToString()); 
+            if (value != null && value >= -10 && value <= 20)
+                SetAsync("TX_IR_GAIN", Math.Abs(value.Value+10).ToString()); 
         } 
+    }
+    public int? Sensitivity
+    {
+        get => sensitivity;
+        set
+        {
+            if (value != null && value >= -10 && value <= 15)
+                SetAsync("TX_IR_TRIM", value.Value.ToString());
+        }
     }
     public int? OutputGain
     {
         get => outputGain;
         set
         {
-            if (value != null && value >= 0 && value <= 32)
-                SetAsync("AUDIO_GAIN", value.Value.ToString());
+            if (value != null && value >= -32 && value <= 0)
+                SetAsync("AUDIO_GAIN", Math.Abs(value.Value).ToString());
         }
     }
     public bool? Mute
@@ -76,6 +87,33 @@ public class ShureWirelessMic : IWirelessMic
             if (value != null)
                 SetAsync("FREQUENCY", (value.Value / 1000).ToString("000000"));
         } 
+    }
+    public LockMode? LockMode
+    {
+        get => lockMode;
+        set
+        {
+            if (value != null)
+            {
+                switch (value)
+                {
+                    case WirelessMicSuiteServer.LockMode.None:
+                        SetAsync("TX_IR_LOCK", "UNLOCK");
+                        break;
+                    case WirelessMicSuiteServer.LockMode.Power:
+                        SetAsync("TX_IR_LOCK", "POWER");
+                        break;
+                    case WirelessMicSuiteServer.LockMode.Frequency:
+                        SetAsync("TX_IR_LOCK", "FREQ");
+                        break;
+                    case WirelessMicSuiteServer.LockMode.FrequencyPower:
+                        SetAsync("TX_IR_LOCK", "FREQ_AND_POWER");
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
     }
     public int? Group 
     {
@@ -142,6 +180,9 @@ public class ShureWirelessMic : IWirelessMic
         receiver.Send($"* GET {receiverNo} TX_BAT *");
         receiver.Send($"* GET {receiverNo} TX_BAT_MINS *");
         receiver.Send($"* GET {receiverNo} TX_POWER *");
+        receiver.Send($"* GET {receiverNo} TX_GAIN *");
+        receiver.Send($"* GET {receiverNo} TX_TRIM *");
+        receiver.Send($"* GET {receiverNo} TX_LOCK *");
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -231,6 +272,21 @@ public class ShureWirelessMic : IWirelessMic
                 else
                     CommandError(fullMsg, "Couldn't parse transmitter gain, or gain was out of the range -10:20.");
                 break;
+            case "TX_IR_TRIM":
+            case "TX_TRIM":
+                if (int.TryParse(args, out int ntrim) && ntrim is >= -10 and <= 15)
+                {
+                    sensitivity = ntrim;
+                    OnPropertyChanged(nameof(Sensitivity));
+                }
+                else if (args.SequenceEqual("UNKNOWN"))
+                {
+                    sensitivity = null;
+                    OnPropertyChanged(nameof(Sensitivity));
+                }
+                else
+                    CommandError(fullMsg, "Couldn't parse transmitter gain, or gain was out of the range -10:20.");
+                break;
             case "SQUELCH":
                 if (int.TryParse(args, out int nsquelch))
                 {
@@ -295,10 +351,33 @@ public class ShureWirelessMic : IWirelessMic
                 transmitterType = args.ToString();
                 OnPropertyChanged(nameof(TransmitterType));
                 break;
-            case "FRONT_PANEL_LOCK":
             case "TX_IR_LOCK":
+            case "TX_LOCK":
+                switch(args)
+                {
+                    case "UNLOCK":
+                        lockMode = WirelessMicSuiteServer.LockMode.None;
+                        OnPropertyChanged(nameof(LockMode));
+                        break;
+                    case "POWER":
+                        lockMode = WirelessMicSuiteServer.LockMode.Power;
+                        OnPropertyChanged(nameof(LockMode));
+                        break;
+                    case "FREQ":
+                        lockMode = WirelessMicSuiteServer.LockMode.Frequency;
+                        OnPropertyChanged(nameof(LockMode));
+                        break;
+                    case "FREQ_AND_POWER":
+                        lockMode = WirelessMicSuiteServer.LockMode.FrequencyPower;
+                        OnPropertyChanged(nameof(LockMode));
+                        break;
+                    case "NOCHANGE":
+                    default:
+                        break;
+                }
+                break;
+            case "FRONT_PANEL_LOCK":
             case "TX_IR_POWER":
-            case "TX_IR_TRIM":
             case "TX_IR_BAT_TYPE":
             case "TX_IR_CUSTOM_GPS":
             case "AUDIO_INDICATOR":
@@ -307,8 +386,6 @@ public class ShureWirelessMic : IWirelessMic
             case "TX_POWER":
             case "TX_CHANGE_BAT":
             case "TX_EXT_DC":
-            case "TX_TRIM":
-            case "TX_LOCK":
                 // Unimplemented for now
                 break;
             default:
@@ -391,6 +468,9 @@ public class ShureWirelessMic : IWirelessMic
 
     private void ParseRFLevelCommand(ReadOnlySpan<char> nargs, ReadOnlySpan<char> args, ReadOnlySpan<char> fullMsg)
     {
+        if (rfScanInProgress == null)
+            return;
+
         // "* RFLEVEL n 10 578000 100 578025 100 578050 100 578075 100 578100 100 578125 100 578150 100 578175 100 578200 100 578225 100 *"
         //  * RFLEVEL n numSamples [freq level]... *
         // level: is in - dBm
