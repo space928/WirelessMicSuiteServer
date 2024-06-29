@@ -1,4 +1,6 @@
 # Wireless Mic Suite
+[![.NET](https://github.com/space928/WirelessMicSuiteServer/actions/workflows/dotnet.yml/badge.svg)](https://github.com/space928/WirelessMicSuiteServer/actions/workflows/dotnet.yml)
+
 A webapp for monitoring and controlling wireless microphone systems.
 
 ### Features
