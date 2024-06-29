@@ -127,6 +127,10 @@ public interface IWirelessMic : INotifyPropertyChanged
     /// </summary>
     public abstract int? Gain { get; set; }
     /// <summary>
+    /// Transmitter sensitivity in dB.
+    /// </summary>
+    public abstract int? Sensitivity { get; set; }
+    /// <summary>
     /// Receiver output gain in dB.
     /// </summary>
     public abstract int? OutputGain { get; set; }
@@ -146,6 +150,10 @@ public interface IWirelessMic : INotifyPropertyChanged
     /// Transmitter frequency channel, within the group.
     /// </summary>
     public abstract int? Channel { get; set; }
+    /// <summary>
+    /// The type of UI lock that is enabled on the wireless transmitter.
+    /// </summary>
+    public abstract LockMode? LockMode { get; set; }
     /// <summary>
     /// Transmitter model type identifier, ie: UR1, UR1H, UR2.
     /// </summary>
@@ -180,6 +188,21 @@ public enum DiversityIndicator
     B = 1 << 1,
     C = 1 << 2,
     D = 1 << 3,
+}
+
+/// <summary>
+/// Represents what type of UI lock is enabled on a wireless transmitter.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<LockMode>))]
+[Flags]
+public enum LockMode
+{
+    None,
+    Mute = 1 << 0,
+    Power = 1 << 1,
+    Frequency = 1 << 2,
+    FrequencyPower = Power | Frequency,
+    All = Mute | Power | Frequency
 }
 
 /// <summary>
@@ -271,6 +294,8 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
     /// <inheritdoc />
     [JsonInclude] public int? Gain { get; set; } = other.Gain;
     /// <inheritdoc />
+    [JsonInclude] public int? Sensitivity { get; set; } = other.Sensitivity;
+    /// <inheritdoc />
     [JsonInclude] public int? OutputGain { get; set; } = other.OutputGain;
     /// <inheritdoc />
     [JsonInclude] public bool? Mute { get; set; } = other.Mute;
@@ -280,6 +305,8 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
     [JsonInclude] public int? Group { get; set; } = other.Group;
     /// <inheritdoc />
     [JsonInclude] public int? Channel { get; set; } = other.Channel;
+    /// <inheritdoc />
+    [JsonInclude] public LockMode? LockMode { get; set; } = other.LockMode;
     /// <inheritdoc />
     [JsonInclude] public string? TransmitterType { get; init; } = other.TransmitterType;
     /// <inheritdoc />
