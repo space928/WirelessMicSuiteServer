@@ -326,6 +326,7 @@ public class ShureWirelessMic : IWirelessMic
         float rssiA = -1;
         float rssiB = -1;
         float audio = -1;
+        DiversityIndicator diversity = DiversityIndicator.None;
         for (int i = 0; i < seps.Length; i++)
         {
             var word = args[seps[i]];
@@ -355,6 +356,23 @@ public class ShureWirelessMic : IWirelessMic
                         return;
                     }
                     break;
+                case "ANTENNA":
+                    switch (args[seps[++i]])
+                    {
+                        case "NONE":
+                            diversity = DiversityIndicator.None;
+                            break;
+                        case "A":
+                            diversity = DiversityIndicator.A;
+                            break;
+                        case "B":
+                            diversity = DiversityIndicator.B;
+                            break;
+                        case "BOTH":
+                            diversity = DiversityIndicator.A | DiversityIndicator.B;
+                            break;
+                    }
+                    break;
                 default:
                     break;
             }
@@ -366,7 +384,7 @@ public class ShureWirelessMic : IWirelessMic
             for (int i = 0; i < 16; i++)
                 meterData.TryDequeue(out _);
         }
-        var meter = new MeteringData(rssiA, rssiB, audio);
+        var meter = new MeteringData(rssiA, rssiB, audio, diversity);
         meterData.Enqueue(meter);
         lastMeterData = meter;
     }

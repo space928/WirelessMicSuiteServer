@@ -1,6 +1,7 @@
 ﻿using Microsoft.OpenApi.Models;
 using System;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Reflection;
 using System.Text;
 
@@ -41,7 +42,7 @@ public static class WebAPI
         });
     }
 
-    public static void AddWebRoots(WebApplication app, WirelessMicManager micManager, WebSocketAPIManager wsAPIManager)
+    public static void AddWebRoots(WebApplication app, WirelessMicManager micManager, WebSocketAPIManager wsAPIManager, CommandLineOptions cli)
     {
         #region Getters
         app.MapGet("/getWirelessReceivers", (HttpContext ctx) =>
@@ -49,7 +50,8 @@ public static class WebAPI
             SetAPIHeaderOptions(ctx);
             return micManager.Receivers.Select(x => new WirelessReceiverData(x));
         }).WithName("GetWirelessReceivers")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets the configuration and status information of all wireless mic receivers.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMics", (HttpContext ctx) =>
@@ -57,7 +59,8 @@ public static class WebAPI
             SetAPIHeaderOptions(ctx);
             return micManager.WirelessMics.Select(x => new WirelessMicData(x));
         }).WithName("GetWirelessMics")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets the configuration and status information of all wireless mic receiver channels.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMicReceiver/{uid}", (uint uid, HttpContext ctx) =>
@@ -68,7 +71,8 @@ public static class WebAPI
                 return new WirelessReceiverData?();
             return new WirelessReceiverData(rec);
         }).WithName("GetWirelessMicReceiver")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets the configuration and status information of a given wireless mic receiver.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/getWirelessMic/{uid}", (uint uid, HttpContext ctx) =>
@@ -79,7 +83,8 @@ public static class WebAPI
                 return new WirelessMicData?();
             return new WirelessMicData(mic);
         }).WithName("GetWirelessMic")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets the configuration and status information of a given wireless mic receiver channel.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/getMicMeter/{uid}", (uint uid, HttpContext ctx) =>
@@ -95,7 +100,8 @@ public static class WebAPI
 
             return samples;
         }).WithName("GetMicMeter")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets an array of RF/Audio meter samples. Returns up to the last 1024 unread meter samples.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/getMicMeterAscii/{uid}", (uint uid, HttpContext ctx) =>
@@ -123,7 +129,8 @@ public static class WebAPI
 
             return sb.ToString();
         }).WithName("GetMicMeterAscii")
-        //.WithGroupName("Getters")
+        .WithDescription("Gets an ASCII-art representation of the RF/Audio meters for the given mic.")
+        .WithTags("Getters")
         .WithOpenApi();
 
         app.MapGet("/rfScan/{uid}", (HttpContext ctx, uint uid, ulong? minFreq, ulong? maxFreq, ulong? stepSize = 25000) =>
@@ -152,7 +159,10 @@ public static class WebAPI
 
             return scan;
         }).WithName("RFScan")
-        //.WithGroupName("Getters")
+        .WithDescription("Starts an RF spectrum scan using the specified receiver. If the min/max freq fields are left " +
+        "unset then this method returns the result/progress of the last RF scan from this receiver. Audio output is " +
+        "automatically muted while the RF scan is ongoing.")
+        .WithTags("Getters")
         .WithOpenApi();
         #endregion
 
@@ -182,7 +192,7 @@ public static class WebAPI
             return new APIResult(true);
         }).WithName("SetWirelessMicReceiver")
         .WithDescription("Sets a named property to the given value on an IWirelessMicReceiver. See IWirelessMicReceiver for the full list of supported properties.")
-        //.WithGroupName("Setters")
+        .WithTags("Setters")
         .WithOpenApi();
 
         var micProps = typeof(IWirelessMic).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.SetProperty);
@@ -209,7 +219,37 @@ public static class WebAPI
             return new APIResult(true);
         }).WithName("SetWirelessMic")
         .WithDescription("Sets a named property to the given value on an IWirelessMic. See IWirelessMic for the full list of supported properties.")
-        //.WithGroupName("Setters")
+        .WithTags("Setters")
+        .WithOpenApi();
+
+        app.MapGet("/identifyWirelessReceiver/{uid}", (uint uid, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var rec = micManager.TryGetWirelessMicReceiver(uid);
+            if (rec == null)
+                return new APIResult(false, $"Couldn't find wireless receiver with UID 0x{uid:X}!");
+
+            rec.Identify();
+
+            return new APIResult(true);
+        }).WithName("IdentifyWirelessReceiver")
+        .WithDescription("Blinks the LEDs on the given wireless mic receiver.")
+        .WithTags("Setters")
+        .WithOpenApi();
+
+        app.MapGet("/rebootWirelessReceiver/{uid}", (uint uid, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var rec = micManager.TryGetWirelessMicReceiver(uid);
+            if (rec == null)
+                return new APIResult(false, $"Couldn't find wireless receiver with UID 0x{uid:X}!");
+
+            rec.Reboot();
+
+            return new APIResult(true);
+        }).WithName("RebootWirelessReceiver")
+        .WithDescription("Reboots the given wireless mic receiver.")
+        .WithTags("Setters")
         .WithOpenApi();
         #endregion
 
@@ -228,23 +268,145 @@ public static class WebAPI
 
             await socketFinishedTcs.Task;
         }).WithName("OpenWebSocket")
+        .WithTags("WebSockets")
         .WithDescription("Opens a new WebSocket for receiving property change notifications and metering data.")
-        //.WithGroupName("Setters")
         .WithOpenApi();
+
+        #region File Storage
+        {
+            string dir = (string)cli.ParsedArgs["--save-dir"]!;
+            try
+            {
+                dir = Path.GetFullPath(dir);
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                    Log($"Save directory '{dir}' created!");
+                } else
+                {
+                    Log($"Save directory is '{dir}'");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Save directory '{dir}' does not exist and couldn't be created! Exception: {ex.Message}", LogSeverity.Warning);
+            }
+        }
+
+        app.MapGet("/getSaveFiles/{query}", (HttpContext ctx, string ? query = null) =>
+        {
+            SetAPIHeaderOptions(ctx);
+
+            string dir = (string)cli.ParsedArgs["--save-dir"]!;
+            string q = (string.IsNullOrEmpty(query) || query == ",") ? "*.json" : query + ".json";
+
+            try
+            {
+                return Directory.EnumerateFiles(dir, q, SearchOption.TopDirectoryOnly).Select(x => Path.GetFileNameWithoutExtension(x));
+            } catch (Exception ex) 
+            {
+                Log($"Failed to enumerate save files '{dir}' query='{q}'. Exception: {ex.Message}", LogSeverity.Warning);
+                ctx.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                return [];
+            }
+        }).WithName("GetSaveFiles")
+        .WithDescription("Enumerates all JSON file matching a given query (supports wildcards) on the web server.")
+        .WithTags("Files")
+        .Produces(200, contentType: "application/json")
+        .Produces(404, contentType: "application/json")
+        .WithOpenApi()
+        .RequireRateLimiting("files");
+
+        app.MapGet("/getSaveFile/{name}", async (string name, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+
+            string dir = (string)cli.ParsedArgs["--save-dir"]!;
+            string path = Path.Combine(dir, name + ".json");
+            try
+            {
+                string data = await File.ReadAllTextAsync(path);
+                ctx.Response.ContentType = "application/json";
+                return data;
+            } catch (Exception ex)
+            {
+                Log($"Failed to get save file '{path}'. Exception: {ex.Message}", LogSeverity.Warning);
+                ctx.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                return "";
+            }
+        }).WithName("GetSaveFile")
+        .WithDescription("Gets a saved JSON file with a given name from the web server.")
+        .WithTags("Files")
+        .Produces(200, contentType: "application/json")
+        .Produces(404, contentType: "application/json")
+        .RequireRateLimiting("files");
+
+        app.MapGet("/getUniqueSaveFileName", (HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+
+            string dir = (string)cli.ParsedArgs["--save-dir"]!;
+            if (!Directory.Exists(dir))
+                return "";
+
+            for (int i = 0; i < 100; i++)
+            {
+                string fname = $"WMS_{DateTime.Now:s}_{i}";
+                string path = Path.Combine(dir, fname + ".json");
+                if (!File.Exists(path))
+                    return fname;
+            }
+
+            return "";
+        }).WithName("GetUniqueSaveFileName")
+        .WithDescription("Gets a unique file name to be used to save a file to the web server.")
+        .WithTags("Files")
+        .WithOpenApi()
+        .RequireRateLimiting("files");
+
+        app.MapPut("/putSaveFile/{name}/{overwrite}", async (HttpContext ctx, string name, bool overwrite = false) =>
+        {
+            SetAPIHeaderOptions(ctx);
+
+            string dir = (string)cli.ParsedArgs["--save-dir"]!;
+            string path = Path.Combine(dir, name + ".json");
+            try
+            {
+                if (ctx.Request.ContentType != "application/json")
+                    throw new InvalidOperationException("Request ContentType was not 'application/json'!");
+
+                var writeStream = new FileStream(path, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write);
+                await ctx.Request.Body.CopyToAsync(writeStream);
+
+                return new APIResult(true);
+            }
+            catch (Exception ex)
+            {
+                string msg = $"Failed to get save file '{path}'. Exception: {ex.Message}";
+                Log(msg, LogSeverity.Warning);
+                ctx.Response.StatusCode = (int)HttpStatusCode.NotFound;
+                return new APIResult(false, msg);
+            }
+        }).WithName("PutSaveFile")
+        .WithDescription("Saves an arbitrary JSON file with a given name to the web server.")
+        .WithTags("Files")
+        .Produces(200, contentType: "application/json")
+        .Produces(404, contentType: "application/json")
+        .WithOpenApi()
+        .RequireRateLimiting("files");
+        #endregion
+    }
+
+    private static readonly ILogger logger = Program.LoggerFac.CreateLogger(typeof(WebAPI).FullName!);
+    private static void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    {
+        logger.Log(message, severity);
     }
 
     private static void SetAPIHeaderOptions(HttpContext ctx)
     {
         ctx.Response.Headers.AccessControlAllowOrigin = "*";
         ctx.Response.Headers.CacheControl = "no-store";
-    }
-
-    private static string CamelCase(string str)
-    {
-        if (string.IsNullOrEmpty(str)) 
-            return str;
-        char l = char.ToLowerInvariant(str[0]);
-        return $"{l}{str[1..]}";
     }
 
     private static bool IsSimple(Type type)

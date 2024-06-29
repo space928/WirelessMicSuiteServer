@@ -89,6 +89,15 @@ public interface IWirelessMicReceiver : IDisposable, INotifyPropertyChanged
     /// The MAC address of the wireless receiver.
     /// </summary>
     public abstract MACAddress? MACAddress { get; }
+
+    /// <summary>
+    /// Flashses the LEDs on the device to identify it.
+    /// </summary>
+    public void Identify();
+    /// <summary>
+    /// Sends a reboot command to the wireless receiver.
+    /// </summary>
+    public void Reboot();
 }
 
 public interface IWirelessMic : INotifyPropertyChanged
@@ -161,20 +170,36 @@ public interface IWirelessMic : INotifyPropertyChanged
 }
 
 /// <summary>
+/// Represents which antenna(e) is currently active.
+/// </summary>
+[Flags]
+public enum DiversityIndicator
+{
+    None = 0,
+    A = 1 << 0,
+    B = 1 << 1,
+    C = 1 << 2,
+    D = 1 << 3,
+}
+
+/// <summary>
 /// A data structure representing a single sample of metering data.
 /// </summary>
 /// <param name="rssiA"></param>
 /// <param name="rssiB"></param>
 /// <param name="audioLevel"></param>
-public struct MeteringData(float rssiA, float rssiB, float audioLevel)
+/// <param name="diversity"></param>
+public struct MeteringData(float rssiA, float rssiB, float audioLevel, DiversityIndicator diversity)
 {
     [JsonIgnore] public float rssiA = rssiA;
     [JsonIgnore] public float rssiB = rssiB;
     [JsonIgnore] public float audioLevel = audioLevel;
+    [JsonIgnore] public DiversityIndicator diversity = diversity;
 
     public readonly float RssiA => rssiA;
     public readonly float RssiB => rssiB;
     public readonly float AudioLevel => audioLevel;
+    public readonly DiversityIndicator Diversity => diversity;
 }
 
 /// <summary>
@@ -186,24 +211,42 @@ public struct WirelessReceiverData(IWirelessMicReceiver other) : IWirelessMicRec
     [JsonIgnore] public IPEndPoint Address { get; init; } = other.Address;
     [JsonIgnore] public IWirelessMic[] WirelessMics { get; init; } = other.WirelessMics;
 
+    /// <inheritdoc />
     public uint UID { get; init; } = other.UID;
 
+    /// <inheritdoc />
     public int NumberOfChannels { get; init; } = other.NumberOfChannels;
+    /// <inheritdoc />
     public readonly IEnumerable<uint> WirelessMicIDs => WirelessMics.Select(x => x.UID);
+    /// <inheritdoc />
     public string? ModelName { get; init; } = other.ModelName;
+    /// <inheritdoc />
     public string? Manufacturer { get; init; } = other.Manufacturer;
+    /// <inheritdoc />
     public string? FreqBand { get; init; } = other.FreqBand;
+    /// <inheritdoc />
     public FrequencyRange[]? FrequencyRanges { get; init; } = other.FrequencyRanges;
+    /// <inheritdoc />
     public string? FirmwareVersion { get; init; } = other.FirmwareVersion;
+    /// <inheritdoc />
     public IPv4Address IPAddress { get; set; } = other.IPAddress;
+    /// <inheritdoc />
     public IPv4Address? Subnet { get; set; } = other.Subnet;
+    /// <inheritdoc />
     public IPv4Address? Gateway { get; set; } = other.Gateway;
+    /// <inheritdoc />
     public IPMode? IPMode { get; set; } = other.IPMode;
+    /// <inheritdoc />
     public MACAddress? MACAddress { get; init; } = other.MACAddress;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public void Dispose() { }
+
+    /// <inheritdoc />
+    public void Identify() { }
+    /// <inheritdoc />
+    public void Reboot() { }
 }
 
 /// <summary>
@@ -217,16 +260,29 @@ public struct WirelessMicData(IWirelessMic other) : IWirelessMic
     [JsonIgnore] public RFScanData RFScanData { get; init; } = other.RFScanData;
     [JsonInclude] public MeteringData? LastMeterData { get; init; } = other.LastMeterData;
 
+    /// <summary>
+    /// The UID of the receiver this mic is connected too.
+    /// </summary>
     [JsonInclude] public readonly uint ReceiverID => Receiver.UID;
+    /// <inheritdoc />
     [JsonInclude] public uint UID { get; init; } = other.UID;
+    /// <inheritdoc />
     [JsonInclude] public string? Name { get; set; } = other.Name;
+    /// <inheritdoc />
     [JsonInclude] public int? Gain { get; set; } = other.Gain;
+    /// <inheritdoc />
     [JsonInclude] public int? OutputGain { get; set; } = other.OutputGain;
+    /// <inheritdoc />
     [JsonInclude] public bool? Mute { get; set; } = other.Mute;
+    /// <inheritdoc />
     [JsonInclude] public ulong? Frequency { get; set; } = other.Frequency;
+    /// <inheritdoc />
     [JsonInclude] public int? Group { get; set; } = other.Group;
+    /// <inheritdoc />
     [JsonInclude] public int? Channel { get; set; } = other.Channel;
+    /// <inheritdoc />
     [JsonInclude] public string? TransmitterType { get; init; } = other.TransmitterType;
+    /// <inheritdoc />
     [JsonInclude] public float? BatteryLevel { get; init; } = other.BatteryLevel;
 
     public event PropertyChangedEventHandler? PropertyChanged;

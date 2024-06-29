@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace WirelessMicSuiteServer;
 
@@ -105,8 +106,11 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<ShureUHFRReceiver>();
     public void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
+#if DEBUG
         if (severity == LogSeverity.Warning || severity == LogSeverity.Error)
-        { }
+        { 
+        }
+#endif
         logger.Log(message, severity);
     }
 
@@ -114,6 +118,41 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     {
         manager.UnregisterWirelessMic(mics[0]);
         manager.UnregisterWirelessMic(mics[1]);
+    }
+
+    public void Identify()
+    {
+        Send("* SET FLASH *");
+    }
+
+    public void Reboot()
+    {
+        const ushort REBOOT_HEADER_LEN = 0xb;
+        const ushort REBOOT_MSG_LEN = 0x16;
+        var msg = new ByteMessage(Address, REBOOT_HEADER_LEN + REBOOT_MSG_LEN + ShureSNetHeader.HEADER_SIZE);
+        var buff = msg.Buffer;
+
+        var header = new ShureSNetHeader(snetID, ShureUHFRManager.ManagerSnetID, ShureSNetHeader.SnetType.Special, REBOOT_HEADER_LEN + REBOOT_MSG_LEN);
+        header.WriteToSpan(buff);
+
+        // Write reboot msg
+        Span<byte> rebootMsg = buff.AsSpan()[(REBOOT_HEADER_LEN + ShureSNetHeader.HEADER_SIZE)..];
+        Unsafe.InitBlock(ref MemoryMarshal.AsRef<byte>(rebootMsg), 0, (uint)rebootMsg.Length);
+        rebootMsg[1] = 7;
+
+        // Write reboot msg header
+        Span<byte> rebootHeader = buff.AsSpan()[ShureSNetHeader.HEADER_SIZE..];
+        rebootHeader[0] = (byte)'0';
+        BinaryPrimitives.WriteUInt16BigEndian(rebootHeader[1..], REBOOT_HEADER_LEN);
+        BinaryPrimitives.WriteUInt16BigEndian(rebootHeader[3..], 1);
+        BinaryPrimitives.WriteUInt16BigEndian(rebootHeader[5..], 1);
+        BinaryPrimitives.WriteUInt16BigEndian(rebootHeader[7..], REBOOT_MSG_LEN);
+        BinaryPrimitives.WriteUInt16BigEndian(rebootHeader[9..], ShureSNetHeader.ComputeChecksum(rebootHeader, 0, 9));
+
+        //string bmsg = string.Join(" ", buff[ShureSNetHeader.HEADER_SIZE..].Select(x => x.ToString("X2")));
+        //Log($"Sending reboot message: '{bmsg}'", LogSeverity.Info);
+
+        manager.SendMessage(msg);
     }
 
     private void SendStartupMessages()
@@ -324,8 +363,8 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
                     try
                     {
                         frequencyRanges = [
-                            new FrequencyRange(ulong.Parse(args[seps[0]]), ulong.Parse(args[seps[1]])),
-                            new FrequencyRange(ulong.Parse(args[seps[2]]), ulong.Parse(args[seps[3]]))
+                            new FrequencyRange(ulong.Parse(args[seps[0]])*1000, ulong.Parse(args[seps[1]])*1000),
+                            new FrequencyRange(ulong.Parse(args[seps[2]])*1000, ulong.Parse(args[seps[3]])*1000)
                         ];
                         OnPropertyChanged(nameof(FrequencyRanges));
                     }
@@ -412,6 +451,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
             case "CUSTOM_GROUP_C4":
             case "CUSTOM_GROUP_C5":
             case "CUSTOM_GROUP_C6":
+            case "FLASH":
                 break;
             default:
                 CommandError(fullMsg);

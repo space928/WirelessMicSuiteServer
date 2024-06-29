@@ -49,6 +49,7 @@ public class CommandLineOptions
                 Log($"Unrecognised command line argument '{arg}'!", LogSeverity.Error);
                 Console.WriteLine();
                 PrintHelp();
+                parsedArgs.TryAdd("--help", null);
                 return;
             }
 
@@ -83,10 +84,17 @@ public class CommandLineOptions
             }
 
             if (!option.Value.multipleArguments)
+            {
+                AddParsedArg(option, tmpList);
                 option = null;
+            }
         }
 
         AddParsedArg(option, tmpList);
+
+        foreach (var arg in options.Where(x => x.Key == x.Value.key).Select(x => x.Value))
+            if (arg.defaultValue != null && !parsedArgs.ContainsKey(arg.key))
+                parsedArgs.Add(arg.key, arg.defaultValue);
 
         void AddParsedArg(CommandLineOption? option, List<object> tmpList)
         {
@@ -103,13 +111,18 @@ public class CommandLineOptions
     {
         var assembly = Assembly.GetExecutingAssembly();
         Console.WriteLine($"##### Wireless Mic Suite Server #####");
-        Console.WriteLine($"# version: {assembly.GetName().Version}");
-        Console.WriteLine($"# ");
-        Console.WriteLine($"# Command line options: ");
-        foreach (var opt in options.Values)
+        Console.WriteLine($"  version: {assembly.GetName().Version}");
+        Console.WriteLine($"");
+        Console.WriteLine($"Command line options: ");
+        foreach (var kvp in options)
         {
+            if (kvp.Key != kvp.Value.key)
+                continue;
+            var opt = kvp.Value;
             Console.WriteLine($"\t{opt.key}{(opt.alias != null?", " + opt.alias:"")} " +
                 $"{(opt.argType != CommandLineArgType.None ? "<"+opt.argType+">":"")}{(opt.multipleArguments?", ...":"")}");
+            if (opt.defaultValue != null)
+                Console.WriteLine($"\t\tDefault: {opt.defaultValue}");
             Console.WriteLine($"\t\t{opt.help}");
             Console.WriteLine();
         }
@@ -117,16 +130,33 @@ public class CommandLineOptions
 }
 
 public struct CommandLineOption(string key, string? alias = null, string? help = null, 
-    CommandLineArgType argType = CommandLineArgType.None, bool multipleArguments = false, 
-    Action<object?>? action = null)
+    CommandLineArgType argType = CommandLineArgType.None, bool multipleArguments = false,
+    object? defaultValue = null, Action<object?>? action = null)
 {
     public string key = key;
     public string? alias = alias;
     public string? help = help;
     public CommandLineArgType argType = argType;
     public bool multipleArguments = multipleArguments;
+    public object? defaultValue = CastToArg(defaultValue, argType);
     //public bool positional;
     public Action<object?>? action = action;
+
+    private static object? CastToArg(object? arg, CommandLineArgType argType)
+    {
+        if (arg == null)
+            return null;
+
+        return argType switch
+        {
+            CommandLineArgType.None => null,
+            CommandLineArgType.String => (string)arg,
+            CommandLineArgType.Int => (int)arg,
+            CommandLineArgType.Uint => (uint)arg,
+            CommandLineArgType.Path => (string)arg,
+            _ => throw new NotImplementedException(),
+        };
+    }
 }
 
 public enum CommandLineArgType

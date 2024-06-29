@@ -46,7 +46,7 @@ public class WebSocketAPI : IDisposable
         decoder = encoding.GetDecoder();
         encoder = encoding.GetEncoder();
 
-        Log($"Opened WebSocket API ...");
+        Log($"Opened WebSocket API...");
 
         rxTask = Task.Run(RxTask);
         txTask = Task.Run(TxTask);
@@ -63,6 +63,7 @@ public class WebSocketAPI : IDisposable
 
     public void Dispose()
     {
+        Log($"WebSocket API closed...");
         manager.UnregisterWebSocket(this);
         cancellationTokenSource.Cancel();
         Task.WaitAll([rxTask, txTask], 1000);
@@ -76,38 +77,51 @@ public class WebSocketAPI : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            var res = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-            if (!res.EndOfMessage)
+            try
             {
-                Log($"Received incomplete WebSocket message! Ignoring...", LogSeverity.Warning);
-                continue;
-            }
-            if (res.CloseStatus != null)
+                var res = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                if (!res.EndOfMessage)
+                {
+                    Log($"Received incomplete WebSocket message! Ignoring...", LogSeverity.Warning);
+                    continue;
+                }
+                if (res.CloseStatus != null)
+                {
+                    cancellationTokenSource.Cancel();
+                    break;
+                }
+                if (res.MessageType != WebSocketMessageType.Text)
+                {
+                    Log($"Unpexpected WebSocket message type '{res.MessageType}'! Ignoring...", LogSeverity.Warning);
+                    continue;
+                }
+
+                int charsRead = decoder.GetChars(buffer, 0, res.Count, charBuffer, 0);
+                var str = charBuffer.AsMemory()[..charsRead];
+                Log($"Received: '{str}'", LogSeverity.Debug);
+            } catch
             {
                 cancellationTokenSource.Cancel();
                 break;
-            } 
-            if (res.MessageType != WebSocketMessageType.Text)
-            {
-                Log($"Unpexpected WebSocket message type '{res.MessageType}'! Ignoring...", LogSeverity.Warning);
-                continue;
             }
-
-            int charsRead = decoder.GetChars(buffer, 0, res.Count, charBuffer, 0);
-            var str = charBuffer.AsMemory()[..charsRead];
-            Log($"Received: '{str}'", LogSeverity.Debug);
         }
     }
 
     private void TxTask() 
     {
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            byte[] msg;
-            while (!txPipe.TryDequeue(out msg!))
-                txAvailableSem.Wait(1000);
-            socket.SendAsync(msg, WebSocketMessageType.Text, true, cancellationToken)
-                .Wait();
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                byte[] msg;
+                while (!txPipe.TryDequeue(out msg!))
+                    txAvailableSem.Wait(1000);
+                socket.SendAsync(msg, WebSocketMessageType.Text, true, cancellationToken)
+                    .Wait();
+            }
+        } catch
+        {
+            cancellationTokenSource.Cancel();
         }
     }
 
@@ -308,6 +322,10 @@ public sealed class NotificationIgnoreAttribute : Attribute { }
 public readonly struct PropertyChangeNotification(string propName, object? value, uint uid)
 {
     /// <summary>
+    /// The UID of the object (microphone or receiver) which was updated.
+    /// </summary>
+    public readonly uint UID { get; init; } = uid;
+    /// <summary>
     /// The name of the property that was updated.
     /// </summary>
     public readonly string PropertyName { get; init; } = propName;
@@ -315,10 +333,6 @@ public readonly struct PropertyChangeNotification(string propName, object? value
     /// The new value of the property.
     /// </summary>
     public readonly object? Value { get; init; } = value;
-    /// <summary>
-    /// The UID of the object (microphone or receiver) which was updated.
-    /// </summary>
-    public readonly uint UID { get; init; } = uid;
 }
 
 [Serializable]
