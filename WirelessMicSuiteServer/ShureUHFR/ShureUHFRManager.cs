@@ -64,7 +64,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<ShureUHFRManager>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
     }
@@ -238,12 +238,15 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     public void Dispose()
     {
         cancellationTokenSource.Cancel();
-        rxTask.Wait(1000);
-        txTask.Wait(1000);
+        Task.WaitAll([txTask, rxTask, pingTask], 1000);
+        pingTask.Dispose();
         rxTask.Dispose();
         txTask.Dispose();
         //discoveryTask.Wait(1000);
         //discoveryTask.Dispose();
+        socket.Dispose();
+        txAvailableSem.Dispose();
+        cancellationTokenSource.Dispose();
     }
 }
 

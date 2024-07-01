@@ -25,7 +25,7 @@ public class CommandLineOptions
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<CommandLineOptions>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
     }

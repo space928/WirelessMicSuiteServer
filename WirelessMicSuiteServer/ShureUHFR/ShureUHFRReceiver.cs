@@ -104,7 +104,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<ShureUHFRReceiver>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
 #if DEBUG
         if (severity == LogSeverity.Warning || severity == LogSeverity.Error)

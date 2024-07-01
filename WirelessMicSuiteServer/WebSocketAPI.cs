@@ -56,7 +56,7 @@ public class WebSocketAPI : IDisposable
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<WebSocketAPI>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
     }

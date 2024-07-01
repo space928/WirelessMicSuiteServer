@@ -27,6 +27,8 @@ internal class Program
 
         ShureUHFREmulator shureEmu = new(addresses, 2202);
 
+        TestMDNSClient.Test();
+
         while (true)
         {
             Thread.Sleep(100);
