@@ -47,10 +47,10 @@ public class SennheiserSSCWirelessMic : IWirelessMic
         {
             if (value != null)
             {
-                var str = value.AsSpan();
+                var str = value.ToUpper().AsSpan();
                 if (str.Length > 8)
                     str = str[..8];
-                receiver.Send($$$$$"""{"rx{{{{{receiverNo}}}}}":{"name":{{{{{str}}}}}}}""");
+                receiver.Send($$$$$"""{"rx{{{{{receiverNo}}}}}":{"name":"{{{{{str}}}}}"}}""");
             }
         }
     }
@@ -75,7 +75,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
         set
         {
             if (value != null)
-                receiver.Send($$$$$"""{"rx{{{{{receiverNo}}}}}":{"sync_settings":{"gain":{{{{{Math.Clamp((int)value, -12, 6)}}}}}}}}""");
+                receiver.Send($$$$$"""{"rx{{{{{receiverNo}}}}}":{"sync_settings":{"trim":{{{{{Math.Clamp((int)value, -12, 6)}}}}}}}}""");
         }
     }
     public int? OutputGain
@@ -424,7 +424,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
             {
                 case "rssi":
                     //rssi: float (dBm)
-                    meter.rssiA = meter.rssiB = prop.Value.GetSingle();
+                    meter.rssiA = meter.rssiB = (prop.Value.GetSingle()+120)/80f;
                     break;
                 case "rsqi":
                     //rsqi: int(%)(RF signal quality indicator)
@@ -446,7 +446,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
                     break;
                 case "af":
                     //af: float (dBfs)
-                    meter.audioLevel = prop.Value.GetSingle();
+                    meter.audioLevel = (prop.Value.GetSingle()+50)/50f;
                     break;
                 default:
                     Log($"Unknown JSON property encountered '{prop.Name}' in '{msg}'!", LogSeverity.Warning);
