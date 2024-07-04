@@ -348,8 +348,11 @@ public class SennheiserSSCWirelessMic : IWirelessMic
                     //bool
                     break;
                 case "trim":
-                    sensitivity = prop.Value.GetInt32();
-                    OnPropertyChanged(nameof(Sensitivity));
+                    if (!isTXConnected)
+                    {
+                        sensitivity = prop.Value.GetInt32();
+                        OnPropertyChanged(nameof(Sensitivity));
+                    }
                     break;
                 case "name_ignore":
                     //bool
@@ -374,7 +377,11 @@ public class SennheiserSSCWirelessMic : IWirelessMic
                     break;
                 case "lock":
                     //bool
-                    lockMode = prop.Value.GetBoolean() ? WirelessMicSuiteServer.LockMode.Power : WirelessMicSuiteServer.LockMode.None;
+                    if (!isTXConnected)
+                    {
+                        lockMode = prop.Value.GetBoolean() ? WirelessMicSuiteServer.LockMode.Power : WirelessMicSuiteServer.LockMode.None;
+                        OnPropertyChanged(nameof(LockMode));
+                    }
                     break;
                 case "led_ignore":
                     //bool
@@ -418,16 +425,19 @@ public class SennheiserSSCWirelessMic : IWirelessMic
     internal void ParseMeterMessage(Memory<char> msg, JsonElement json)
     {
         var meter = lastMeterData == null ? new MeteringData() : new MeteringData(lastMeterData.Value);
+        float rssi = 0;
         foreach (var prop in json.EnumerateObject())
         {
             switch (prop.Name)
             {
                 case "rssi":
                     //rssi: float (dBm)
-                    meter.rssiA = meter.rssiB = (prop.Value.GetSingle()+120)/80f;
+                    rssi = prop.Value.GetSingle();
+                    meter.rssiA = meter.rssiB = (rssi+100)/60f;
                     break;
                 case "rsqi":
                     //rsqi: int(%)(RF signal quality indicator)
+                    //meter.rssiA = meter.rssiB = prop.Value.GetInt32() / 100f;
                     break;
                 case "divi":
                     //divi: 0,1,2 (None, antenna A, antenna B)
