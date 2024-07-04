@@ -39,8 +39,13 @@ public class ShureWirelessMic : IWirelessMic
         get => name; 
         set 
         {
-            if (value != null && value.Length < 12)
-                SetAsync("CHAN_NAME", value.Replace(' ', '_')); 
+            if (value != null)
+            {
+                var str = value.Replace(' ', '_');
+                if (str.Length > 12)
+                    str = str[..12];
+                SetAsync("CHAN_NAME", str);
+            }
         }
     }
     public int? Gain 
@@ -48,8 +53,8 @@ public class ShureWirelessMic : IWirelessMic
         get => gain; 
         set 
         {
-            if (value != null && value >= -10 && value <= 20)
-                SetAsync("TX_IR_GAIN", Math.Abs(value.Value+10).ToString()); 
+            if (value != null)
+                SetAsync("TX_IR_GAIN", Math.Abs(Math.Clamp(value.Value, -10, 20)+10).ToString()); 
         } 
     }
     public int? Sensitivity
@@ -57,8 +62,8 @@ public class ShureWirelessMic : IWirelessMic
         get => sensitivity;
         set
         {
-            if (value != null && value >= -10 && value <= 15)
-                SetAsync("TX_IR_TRIM", value.Value.ToString());
+            if (value != null)
+                SetAsync("TX_IR_TRIM", Math.Clamp(value.Value, -10, 15).ToString());
         }
     }
     public int? OutputGain
@@ -66,8 +71,8 @@ public class ShureWirelessMic : IWirelessMic
         get => outputGain;
         set
         {
-            if (value != null && value >= -32 && value <= 0)
-                SetAsync("AUDIO_GAIN", Math.Abs(value.Value).ToString());
+            if (value != null)
+                SetAsync("AUDIO_GAIN", Math.Abs(Math.Clamp(value.Value, -32, 0)).ToString());
         }
     }
     public bool? Mute

@@ -56,7 +56,9 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
         Log($"Starting Sennheiser SSC server...");
 
         socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        socket.Bind(new IPEndPoint(IPAddress.Any, UdpPort));
+        //socket.ReceiveTimeout = 1000;
+        //socket.Bind(new IPEndPoint(IPAddress.Any, UdpPort));
+        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
         rxTask = Task.Run(RXTask);
         txTask = Task.Run(TXTask);
         mDNSClient = new MDNSClient();
@@ -186,11 +188,21 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
             }
 
             int charsRead = decoder.GetChars(buffer, 0, read, charBuffer, 0);
-            Span<char> str = charBuffer.AsSpan()[..charsRead];
+            Memory<char> str = charBuffer.AsMemory()[..charsRead];
             Log($"Received: '{str}'", LogSeverity.Debug);
 
             if (receiversDict.TryGetValue(uid, out var rec))
-                rec.Receive(str);
+            {
+                try
+                {
+                    rec.Receive(str);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Exception while reading message '{str}'", LogSeverity.Warning);
+                    Log(ex.ToString(), LogSeverity.Warning);
+                }
+            }
         }
     }
 
@@ -199,7 +211,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
         while (!cancellationToken.IsCancellationRequested)
         {
             ByteMessage msg;
-            while (!txPipe.TryDequeue(out msg))
+            while (!txPipe.TryDequeue(out msg) && !cancellationToken.IsCancellationRequested)
                 txAvailableSem.Wait(1000);
             try
             {
@@ -262,7 +274,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
     public void Dispose()
     {
         cancellationTokenSource.Cancel();
-        Task.WaitAll([txTask, rxTask], 1000);
+        //Task.WaitAll([txTask, rxTask], 1000);
         mDNSClient.Dispose();
         rxTask.Dispose();
         txTask.Dispose();

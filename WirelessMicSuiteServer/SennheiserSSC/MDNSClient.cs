@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,7 +25,7 @@ public class MDNSClient : IDisposable
     private readonly CancellationToken cancellationToken;
     private readonly CancellationTokenSource cancellationTokenSource;
     private readonly ConcurrentQueue<ByteMessage> txPipe;
-    private readonly ConcurrentDictionary<ushort, ushort> activeQueries;
+    private readonly ConcurrentDictionary<ushort, DateTime> activeQueries;
     private readonly SemaphoreSlim txAvailableSem;
 
     public event Action<MDNSMessage>? OnMDNSMessage;
@@ -45,10 +46,22 @@ public class MDNSClient : IDisposable
         Log($"Starting MDNS discovery server...");
 
         socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        //socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        //socket.Bind(new IPEndPoint(IPAddress.Any, UdpPort));
-        //socket.Connect(new IPEndPoint(broadcastAddress, UdpPort));
-        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+        //socket.ReceiveTimeout = 1000;
+        Log("List network interfaces: ");
+        List<IPAddress> addresses = [];
+        IPAddress? addr = null;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            var nicAddr = nic.GetIPProperties().UnicastAddresses.Select(x => x.Address);
+            addresses.AddRange(nicAddr);
+            if (nicAddr.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork) is IPAddress naddr)
+                addr ??= naddr;
+            Log($"\t{nic.Name}: {string.Join(", ", nicAddr)}");
+        }
+        //socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+        socket.Bind(new IPEndPoint(addr ?? IPAddress.Any, 0));
+        //socket.SendTo([0, 0, 0, 0], new IPEndPoint(broadcastAddress, UdpPort));
+        Log($"mDNS client bound to {socket.LocalEndPoint}.");
         rxTask = Task.Run(RXTask);
         txTask = Task.Run(TXTask);
     }
@@ -62,7 +75,7 @@ public class MDNSClient : IDisposable
     public void Dispose()
     {
         cancellationTokenSource.Cancel();
-        Task.WaitAll([rxTask, txTask], 1000);
+        //Task.WaitAll([rxTask, txTask], 1000);
         rxTask.Dispose();
         txTask.Dispose();
         socket.Dispose();
@@ -139,7 +152,7 @@ public class MDNSClient : IDisposable
         while (!cancellationToken.IsCancellationRequested)
         {
             ByteMessage msg;
-            while (!txPipe.TryDequeue(out msg))
+            while (!txPipe.TryDequeue(out msg) && !cancellationToken.IsCancellationRequested)
                 txAvailableSem.Wait(1000);
             try
             {
@@ -156,8 +169,18 @@ public class MDNSClient : IDisposable
     public void SendQuery(DNSRecordMessage query, ushort? transactionID = null)
     {
         transactionID ??= (ushort)(Random.Shared.Next() & ushort.MaxValue);
-        if (!activeQueries.TryAdd(transactionID.Value, transactionID.Value))
+        if (!activeQueries.TryAdd(transactionID.Value, DateTime.UtcNow))
+        {
             throw new ArgumentException($"Transaction ID {transactionID.Value} is still active and can't be reused.", nameof(transactionID));
+        }
+        if (activeQueries.Count > 32)
+        {
+            var now = DateTime.UtcNow;
+            var timeout = TimeSpan.FromSeconds(10);
+            foreach (var kvp in activeQueries)
+                if (now - kvp.Value > timeout)
+                    activeQueries.TryRemove(kvp.Key, out _);
+        }    
 
         var header = new MDNSMessageHeader(transactionID.Value, MDNSFlags.None, 1, 0, 0, 0);
         int len = MDNSMessageHeader.HEADER_LENGTH + query.length;
@@ -518,6 +541,11 @@ public readonly struct DNS_CNAME : IDNSRData
         name = DNSRecordMessage.ParseDomainName(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
     }
+
+    public override string ToString()
+    {
+        return $"DNS_CNAME {{\n\t{name}\n}}";
+    }
 }
 
 public readonly struct DNS_HINFO : IDNSRData
@@ -534,6 +562,11 @@ public readonly struct DNS_HINFO : IDNSRData
         cpu = DNSRecordMessage.ParseCharacterString(data, utf8Decoder, ref dataPtr);
         os = DNSRecordMessage.ParseCharacterString(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
+    }
+
+    public override string ToString()
+    {
+        return $"DNS_HINFO {{\n\tcpu={cpu}\n\tos={os}\n}}";
     }
 }
 
@@ -644,6 +677,11 @@ public readonly struct DNS_MX : IDNSRData
         exchange = DNSRecordMessage.ParseDomainName(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
     }
+
+    public override string ToString()
+    {
+        return $"DNS_MX {{\n\tpreference={preference}\n\texchange={exchange}\n}}";
+    }
 }
 
 public readonly struct DNS_NULL : IDNSRData
@@ -658,6 +696,11 @@ public readonly struct DNS_NULL : IDNSRData
         this.data = new byte[end - offset];
         data[offset..end].CopyTo(this.data);
         Length = this.data.Length;
+    }
+
+    public override string ToString()
+    {
+        return $"DNS_NULL {{\n\t{Convert.ToHexString(data)}\n}}";
     }
 }
 
@@ -674,6 +717,11 @@ public readonly struct DNS_NS : IDNSRData
         nsDName = DNSRecordMessage.ParseDomainName(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
     }
+
+    public override string ToString()
+    {
+        return $"DNS_NS {{\n\tnsDName={nsDName}\n}}";
+    }
 }
 
 public readonly struct DNS_PTR : IDNSRData
@@ -688,6 +736,11 @@ public readonly struct DNS_PTR : IDNSRData
         int dataPtr = offset;
         ptrDName = DNSRecordMessage.ParseDomainName(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
+    }
+
+    public override string ToString()
+    {
+        return $"DNS_PTR {{\n\tptrDName={ptrDName}\n}}";
     }
 }
 
@@ -736,6 +789,11 @@ public readonly struct DNS_TXT : IDNSRData
         txtData = [.. strings];
         Length = end - offset;
     }
+
+    public override string ToString()
+    {
+        return $"DNS_TXT {{\n\t{string.Join("\n\t", txtData)}\n}}";
+    }
 }
 
 public readonly struct DNS_A : IDNSRData
@@ -751,6 +809,11 @@ public readonly struct DNS_A : IDNSRData
         address = new IPAddress(data[dataPtr..(dataPtr+4)]);dataPtr += 4;
         Length = dataPtr;
     }
+
+    public override string ToString()
+    {
+        return $"DNS_A {{\n\t{address}\n}}";
+    }
 }
 
 public readonly struct DNS_AAAA : IDNSRData
@@ -765,6 +828,11 @@ public readonly struct DNS_AAAA : IDNSRData
         int dataPtr = offset;
         address = new IPAddress(data[dataPtr..(dataPtr+16)]); dataPtr += 16;
         Length = dataPtr;
+    }
+
+    public override string ToString()
+    {
+        return $"DNS_AAAA {{\n\t{address}\n}}";
     }
 }
 
@@ -807,6 +875,11 @@ public readonly struct DNS_SRV : IDNSRData
         port = BinaryPrimitives.ReadUInt16BigEndian(data[dataPtr..]); dataPtr += 2;
         target = DNSRecordMessage.ParseDomainName(data, utf8Decoder, ref dataPtr);
         Length = dataPtr;
+    }
+
+    public override string ToString()
+    {
+        return $"DNS_SRV {{\n\tpriority={priority}\n\tweight={weight}\n\tport={port}\n\ttarget={target}\n}}";
     }
 }
 #endregion

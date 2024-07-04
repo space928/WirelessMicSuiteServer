@@ -61,16 +61,16 @@ public class WebSocketAPI : IDisposable
         logger.Log(message, severity);
     }
 
-    public void Dispose()
+    public async void Dispose()
     {
         Log($"WebSocket API closed...");
         manager.UnregisterWebSocket(this);
         cancellationTokenSource.Cancel();
-        Task.WaitAll([rxTask, txTask], 1000);
+        await Task.WhenAll([rxTask, txTask]);
         rxTask.Dispose();
         txTask.Dispose();
         cancellationTokenSource.Dispose();
-        taskCompletion.SetResult();
+        taskCompletion.TrySetResult();
     }
 
     private async void RxTask()
@@ -105,6 +105,7 @@ public class WebSocketAPI : IDisposable
                 break;
             }
         }
+        taskCompletion.TrySetResult();
     }
 
     private void TxTask() 
@@ -114,7 +115,7 @@ public class WebSocketAPI : IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 byte[] msg;
-                while (!txPipe.TryDequeue(out msg!))
+                while (!txPipe.TryDequeue(out msg!) && !cancellationToken.IsCancellationRequested)
                     txAvailableSem.Wait(1000);
                 socket.SendAsync(msg, WebSocketMessageType.Text, true, cancellationToken)
                     .Wait();
@@ -123,6 +124,7 @@ public class WebSocketAPI : IDisposable
         {
             cancellationTokenSource.Cancel();
         }
+        taskCompletion.TrySetResult();
     }
 
     internal void SendMessage(byte[] message)
@@ -188,6 +190,8 @@ public class WebSocketAPIManager : IDisposable
                     throw new InvalidOperationException();
             }
         };
+        foreach (var rec in micManager.Receivers)
+            RegisterPropertyChangeHandler(rec);
 
         isSendingMeteringMsg = false;
         meteringTimer = new(TimeSpan.FromMilliseconds(meterInterval))
@@ -208,7 +212,7 @@ public class WebSocketAPIManager : IDisposable
         {
             var meterData = micManager.WirelessMics.Where(x => x.LastMeterData != null)
                 .Select(x => new MeterInfoNotification(x.UID, x.LastMeterData!.Value));
-            var json = JsonSerializer.SerializeToUtf8Bytes(meterData);
+            var json = JsonSerializer.SerializeToUtf8Bytes(meterData, jsonSerializerOptions);
 
             foreach (var client in clients)
                 client.SendMessage(json);

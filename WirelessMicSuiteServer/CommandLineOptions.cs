@@ -46,11 +46,12 @@ public class CommandLineOptions
 
             if (option == null)
             {
-                Log($"Unrecognised command line argument '{arg}'!", LogSeverity.Error);
+                /*Log($"Unrecognised command line argument '{arg}'!", LogSeverity.Error);
                 Console.WriteLine();
                 PrintHelp();
                 parsedArgs.TryAdd("--help", null);
-                return;
+                return;*/
+                continue;
             }
 
             try
