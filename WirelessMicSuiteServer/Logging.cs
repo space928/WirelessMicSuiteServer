@@ -93,7 +93,7 @@ public sealed class WebLoggerFormatter : ConsoleFormatter, IDisposable
             cat = cat[(sep+1)..];
 
         textWriter.WriteColor(foreground: ConsoleColor.Gray);
-        textWriter.Write($"[{DateTime.Now:T}] [{cat,-16}] [{LogLevelName(logEntry.LogLevel)}] ");
+        textWriter.Write($"[{DateTime.Now:T}] [{cat,-22}] [{LogLevelName(logEntry.LogLevel)}] ");
         textWriter.WriteColor(foreground: LogLevelColour(logEntry.LogLevel));
         textWriter.Write(message);
         textWriter.WriteDefaultColor();

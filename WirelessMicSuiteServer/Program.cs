@@ -24,12 +24,15 @@ public class Program
         Log($"Version: {assembly.GetName().Version}; {copyright}");
 
         int meterInterval = 50;
-        if (cli.ParsedArgs.TryGetValue("--meter-interval", out object? arg))
-            meterInterval = (int)(uint)arg!;
-        Log($"List options: \n{string.Join('\n', cli.ParsedArgs.Select(x => $"\t{x.Key} = {x.Value}"))}");
+        if (cli.ParsedArgs.TryGetValue("--meter-interval", out object? meterIntervalArg))
+            meterInterval = (int)(uint)meterIntervalArg!;
+        Log($"List options: ");
+        foreach (var a in cli.ParsedArgs)
+            Log($"\t{a.Key} = {a.Value}");
 
         WirelessMicManager micManager = new([
-            new ShureUHFRManager() { PollingPeriodMS = meterInterval }
+            new ShureUHFRManager() { PollingPeriodMS = meterInterval },
+            new SennheiserSSCManager() { PollingPeriodMS = meterInterval }
         ]);
         WebSocketAPIManager wsAPIManager = new(micManager, meterInterval);
         if (cli.ParsedArgs.ContainsKey("--meters"))

@@ -57,6 +57,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         Log($"Starting Shure UHF-R server...");
 
         socket = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        //socket.ReceiveTimeout = 1000;
         socket.Bind(new IPEndPoint(IPAddress.Any, UdpPortPrivate));
         rxTask = Task.Run(RXTask);
         txTask = Task.Run(TXTask);
@@ -64,7 +65,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<ShureUHFRManager>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
     }
@@ -168,7 +169,7 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         while (!cancellationToken.IsCancellationRequested)
         {
             ByteMessage msg;
-            while (!txPipe.TryDequeue(out msg))
+            while (!txPipe.TryDequeue(out msg) && !cancellationToken.IsCancellationRequested)
                 txAvailableSem.Wait(1000);
             try
             {
@@ -238,12 +239,15 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     public void Dispose()
     {
         cancellationTokenSource.Cancel();
-        rxTask.Wait(1000);
-        txTask.Wait(1000);
+        //Task.WaitAll([txTask, rxTask, pingTask], 1000);
+        pingTask.Dispose();
         rxTask.Dispose();
         txTask.Dispose();
         //discoveryTask.Wait(1000);
         //discoveryTask.Dispose();
+        socket.Dispose();
+        txAvailableSem.Dispose();
+        cancellationTokenSource.Dispose();
     }
 }
 

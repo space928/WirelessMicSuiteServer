@@ -194,15 +194,15 @@ public enum DiversityIndicator
 /// Represents what type of UI lock is enabled on a wireless transmitter.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<LockMode>))]
-[Flags]
+//[Flags]
 public enum LockMode
 {
     None,
-    Mute = 1 << 0,
-    Power = 1 << 1,
-    Frequency = 1 << 2,
-    FrequencyPower = Power | Frequency,
-    All = Mute | Power | Frequency
+    //Mute = 1,
+    Power = 2,
+    Frequency = 3,
+    FrequencyPower = 4,
+    All = 5
 }
 
 /// <summary>
@@ -223,6 +223,10 @@ public struct MeteringData(float rssiA, float rssiB, float audioLevel, Diversity
     public readonly float RssiB => rssiB;
     public readonly float AudioLevel => audioLevel;
     public readonly DiversityIndicator Diversity => diversity;
+
+    public MeteringData(MeteringData other) :
+        this(other.rssiA, other.rssiB, other.audioLevel, other.diversity)
+    { }
 }
 
 /// <summary>
@@ -515,6 +519,7 @@ public struct MACAddress
     /// <exception cref="ArgumentException"></exception>
     public MACAddress(ReadOnlySpan<char> str)
     {
+        // TODO: Handle MAC addresses which don't have 2 chars per byte (including 1 and 0 chars per byte) ie: ff:a::22:1:1
         if (str.Length < 6 * 2 + 5)
             throw new ArgumentException($"Input string '{str}' is too short to parse as a MAC address!");
 

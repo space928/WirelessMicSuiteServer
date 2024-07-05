@@ -364,3 +364,4 @@ FodyWeavers.xsd
 
 # Default save directory
 WirelessMicSuiteServer/save/
+/WirelessMicSuiteServer/wwwroot

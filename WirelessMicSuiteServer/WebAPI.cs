@@ -443,10 +443,14 @@ public static class WebAPI
             return strConstructor.Invoke([valueStr]);
         }
 
+        object? value;
         var simpleType = targetType;
         if (targetType.IsEnum)
+        {
+            if (Enum.TryParse(targetType, valueStr, out value))
+                return value;
             simpleType = targetType.GetEnumUnderlyingType();
-        object? value;
+        }
 
         try
         {

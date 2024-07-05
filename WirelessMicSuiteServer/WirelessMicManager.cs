@@ -71,7 +71,7 @@ public class WirelessMicManager : IDisposable
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<WirelessMicManager>();
-    public void Log(string? message, LogSeverity severity = LogSeverity.Info)
+    private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
         logger.Log(message, severity);
     }
