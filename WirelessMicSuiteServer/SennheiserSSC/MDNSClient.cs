@@ -30,7 +30,7 @@ public class MDNSClient : IDisposable
 
     public event Action<MDNSMessage>? OnMDNSMessage;
 
-    public MDNSClient(string? preferredIp)
+    public MDNSClient(string? preferredIp = null)
     {
         cancellationTokenSource = new();
         cancellationToken = cancellationTokenSource.Token;
