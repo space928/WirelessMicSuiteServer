@@ -359,6 +359,10 @@ public struct RFScanData
     /// The current state of the RF scan operation.
     /// </summary>
     public Status State { get; internal set; }
+    /// <summary>
+    /// The error message related to the state of the RF scan operation.
+    /// </summary>
+    public string? StatusMessage { get; internal set; }
 
     /// <summary>
     /// An RF spectrum sample.

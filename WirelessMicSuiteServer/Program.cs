@@ -32,7 +32,7 @@ public class Program
 
         WirelessMicManager micManager = new([
             new ShureUHFRManager() { PollingPeriodMS = meterInterval },
-            new SennheiserSSCManager() { PollingPeriodMS = meterInterval }
+            new SennheiserSSCManager((string?)cli.ParsedArgs.GetValueOrDefault("--nic-address")) { PollingPeriodMS = meterInterval }
         ]);
         WebSocketAPIManager wsAPIManager = new(micManager, meterInterval);
         if (cli.ParsedArgs.ContainsKey("--meters"))
@@ -45,7 +45,8 @@ public class Program
         return new CommandLineOptions([
             new("--meters", "-m", help: "Displays ASCII-art meters in the terminal for the connected wireless mics. Don't use this in production."),
             new("--meter-interval", "-i", argType: CommandLineArgType.Uint, defaultValue: 50u, help:"Sets the interval at which metering information should be polled from the wireless receivers. This is specified in milli-seconds."),
-            new("--save-dir", "-s", argType: CommandLineArgType.String, defaultValue: "save", help:"Specifies a directory to save.")
+            new("--save-dir", "-s", argType: CommandLineArgType.String, defaultValue: "save", help:"Specifies a directory to save."),
+            new("--nic-address", "-a", argType: CommandLineArgType.String, defaultValue: null, help:"Specifies the IP address of the network adapter to use.")
         ], args);
     }
 

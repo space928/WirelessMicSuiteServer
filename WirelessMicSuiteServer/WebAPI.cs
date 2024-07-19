@@ -253,6 +253,39 @@ public static class WebAPI
         .WithOpenApi();
         #endregion
 
+#if DEBUG
+        app.MapGet("/debug/{n}/{delay}", async (int n, int delay, HttpContext ctx) =>
+        {
+            SetAPIHeaderOptions(ctx);
+            var rec = micManager.Receivers.FirstOrDefault();
+            if (rec == null)
+                return new APIResult(false, $"Couldn't find wireless receiver with UID 0x{0:X}!");
+
+            RFScanData[]? res = null;
+            try
+            {
+                var freqRange = new FrequencyRange(rec.FrequencyRanges![0].StartFrequency, rec.FrequencyRanges[0].StartFrequency + 1000000);
+                List<Task<RFScanData>> scans = [];
+                foreach (var mic in rec.WirelessMics.Take(n))
+                {
+                    scans.Add(mic!.StartRFScan(freqRange, 25000));
+                    if (delay > 0)
+                        await Task.Delay(delay);
+                }
+                res = await Task.WhenAll(scans);
+            }
+            catch (Exception ex)
+            {
+                return new APIResult(false, ex.Message);
+            }
+
+            return new APIResult(true, null, res);
+        }).WithName("Debug")
+        .WithDescription("Runs the debug method.")
+        .WithTags("Debug")
+        .WithOpenApi();
+#endif
+
         app.Map("/ws", async (HttpContext ctx) => 
         {
             if (!ctx.WebSockets.IsWebSocketRequest)
@@ -503,10 +536,12 @@ public static class WebAPI
     /// </summary>
     /// <param name="success">Whether the operation succeeded.</param>
     /// <param name="message">Optionally, an error message if it failed.</param>
+    /// <param name="result">Optionally, the result of the APi operation.</param>
     [Serializable]
-    public readonly struct APIResult(bool success, string? message = null)
+    public readonly struct APIResult(bool success, string? message = null, object? result = null)
     {
         public readonly bool Success { get; init; } = success;
         public readonly string? Message { get; init; } = message;
+        public readonly object? Result { get; init; } = result;
     }
 }
