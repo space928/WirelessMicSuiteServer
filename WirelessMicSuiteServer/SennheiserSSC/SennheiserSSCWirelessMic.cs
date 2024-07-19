@@ -28,6 +28,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
     private float? batteryLevel;
 
     private bool isTXConnected = false;
+    private ulong? lastFrequency;
     private bool isCollectingRFSamples;
     private Task<RFScanData>? rfScanInProgress;
     private MeteringData? lastMeterData;
@@ -184,6 +185,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
             rfScanData.StepSize = stepSize;
             rfScanData.Samples = [];
             rfSamples.Clear();
+            lastFrequency = frequency;
 
             isCollectingRFSamples = true;
             stepSize = Math.Min((stepSize / 25000) * 25000, stepSize);
@@ -194,7 +196,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
                 for (ulong freq = range.StartFrequency; freq < range.EndFrequency + 1; freq += stepSize)
                 {
                     Frequency = freq;
-                    Thread.Sleep(100);
+                    Thread.Sleep(120);
                     rfScanData.Progress = ++i/(float)nsteps;
                 }
             }
@@ -206,6 +208,7 @@ public class SennheiserSSCWirelessMic : IWirelessMic
                 rfScanData.Samples.Add(new(sample.Key, sample.Value.sample / sample.Value.n));
             }
 
+            Frequency = lastFrequency;
             rfScanData.State = RFScanData.Status.Completed;
 
             return rfScanData;

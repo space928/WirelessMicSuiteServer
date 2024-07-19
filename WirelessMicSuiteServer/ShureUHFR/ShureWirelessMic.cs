@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace WirelessMicSuiteServer;
 
@@ -34,10 +35,10 @@ public class ShureWirelessMic : IWirelessMic
     public RFScanData RFScanData => rfScanData;
 
     public uint UID => uid;
-    public string? Name 
-    { 
-        get => name; 
-        set 
+    public string? Name
+    {
+        get => name;
+        set
         {
             if (value != null)
             {
@@ -48,14 +49,14 @@ public class ShureWirelessMic : IWirelessMic
             }
         }
     }
-    public int? Gain 
-    { 
-        get => gain; 
-        set 
+    public int? Gain
+    {
+        get => gain;
+        set
         {
             if (value != null)
-                SetAsync("TX_IR_GAIN", Math.Abs(Math.Clamp(value.Value, -10, 20)+10).ToString()); 
-        } 
+                SetAsync("TX_IR_GAIN", Math.Abs(Math.Clamp(value.Value, -10, 20) + 10).ToString());
+        }
     }
     public int? Sensitivity
     {
@@ -76,22 +77,22 @@ public class ShureWirelessMic : IWirelessMic
         }
     }
     public bool? Mute
-    { 
+    {
         get => mute;
-        set 
+        set
         {
             if (value != null)
                 SetAsync("MUTE", value.Value ? "ON" : "OFF");
         }
     }
-    public ulong? Frequency 
-    { 
-        get => frequency; 
-        set 
+    public ulong? Frequency
+    {
+        get => frequency;
+        set
         {
             if (value != null)
                 SetAsync("FREQUENCY", (value.Value / 1000).ToString("000000"));
-        } 
+        }
     }
     public LockMode? LockMode
     {
@@ -120,7 +121,7 @@ public class ShureWirelessMic : IWirelessMic
             }
         }
     }
-    public int? Group 
+    public int? Group
     {
         get => group;
         set
@@ -129,9 +130,9 @@ public class ShureWirelessMic : IWirelessMic
                 SetAsync("GROUP_CHAN", $"{value:00} {channel:00}");
         }
     }
-    public int? Channel 
-    { 
-        get => channel; 
+    public int? Channel
+    {
+        get => channel;
         set
         {
             if (value != null)
@@ -219,11 +220,12 @@ public class ShureWirelessMic : IWirelessMic
         }
         else if (type == ShureCommandType.SCAN)
         {
+            //Log($"Scan message: {fullMsg}");
             scanCommands.Enqueue((cmd.ToString(), args.ToString()));
             scanCommandsSem.Release();
             return;
         }
-        else if(type == ShureCommandType.RFLEVEL)
+        else if (type == ShureCommandType.RFLEVEL)
         {
             ParseRFLevelCommand(cmd, args, fullMsg);
             return;
@@ -268,7 +270,7 @@ public class ShureWirelessMic : IWirelessMic
                 {
                     gain = ngain - 10;
                     OnPropertyChanged(nameof(Gain));
-                } 
+                }
                 else if (args.SequenceEqual("UNKNOWN"))
                 {
                     gain = null;
@@ -310,7 +312,8 @@ public class ShureWirelessMic : IWirelessMic
                     channel = c;
                     OnPropertyChanged(nameof(Group));
                     OnPropertyChanged(nameof(Channel));
-                } else if (args.SequenceEqual("-- --"))
+                }
+                else if (args.SequenceEqual("-- --"))
                 {
                     group = null;
                     channel = null;
@@ -323,9 +326,10 @@ public class ShureWirelessMic : IWirelessMic
             case "FREQUENCY":
                 if (ulong.TryParse(args, out ulong freq))
                 {
-                    frequency = freq*1000;
+                    frequency = freq * 1000;
                     OnPropertyChanged(nameof(Frequency));
-                } else
+                }
+                else
                     CommandError(fullMsg, "Couldn't parse frequency as a ulong.");
                 break;
             case "TX_BAT":
@@ -344,9 +348,10 @@ public class ShureWirelessMic : IWirelessMic
                     int level = (byte)args[0] - (byte)'0';
                     if (level is >= 1 and <= 5)
                     {
-                        batteryLevel = level/5f;
+                        batteryLevel = level / 5f;
                         OnPropertyChanged(nameof(BatteryLevel));
-                    } else
+                    }
+                    else
                     {
                         CommandError(fullMsg, "Battery level out of range 1-5.");
                     }
@@ -358,7 +363,7 @@ public class ShureWirelessMic : IWirelessMic
                 break;
             case "TX_IR_LOCK":
             case "TX_LOCK":
-                switch(args)
+                switch (args)
                 {
                     case "UNLOCK":
                         lockMode = WirelessMicSuiteServer.LockMode.None;
@@ -494,14 +499,14 @@ public class ShureWirelessMic : IWirelessMic
             return;
         }
 
-        for (int i = 0; i < n*2; i+=2)
+        for (int i = 0; i < n * 2; i += 2)
         {
-            if (!uint.TryParse(args[splits[i]], out uint freq) || !uint.TryParse(args[splits[i+1]], out uint rf))
+            if (!uint.TryParse(args[splits[i]], out uint freq) || !uint.TryParse(args[splits[i + 1]], out uint rf))
             {
-                CommandError(fullMsg, $"Couldn't parse RF level sample {i/2}.");
+                CommandError(fullMsg, $"Couldn't parse RF level sample {i / 2}.");
                 return;
             }
-            rfScanData.Samples.Add(new(freq*1000, -(float)rf));
+            rfScanData.Samples.Add(new(freq * 1000, -(float)rf));
         }
 
         rfScanData.Progress = rfScanData.Samples.Count / (float)((rfScanData.FrequencyRange.EndFrequency - rfScanData.FrequencyRange.StartFrequency) / rfScanData.StepSize + 1);
@@ -519,13 +524,33 @@ public class ShureWirelessMic : IWirelessMic
         }
     }
 
+    private bool WaitForMessage(string command, string? args, TimeSpan timeout, Func<bool>? whileWaiting = null)
+    {
+        var startTime = DateTime.UtcNow;
+        while (DateTime.UtcNow - startTime < timeout)
+        {
+            if (scanCommands.TryDequeue(out var cmd))
+            {
+                //Log($"Read scan message: * {cmd.cmd} {receiverNo} {cmd.args} *");
+                if (cmd.cmd == command && (args == null || cmd.args == args))
+                    return true;
+            }
+            else
+            {
+                if (whileWaiting?.Invoke() ?? false)
+                    return true;
+                scanCommandsSem.Wait(200);
+            }
+        }
+        return false;
+    }
+
     public Task<RFScanData> StartRFScan(FrequencyRange range, ulong stepSize)
     {
         if (rfScanInProgress != null && !rfScanInProgress.IsCompleted)
             return rfScanInProgress;
 
         var startTime = DateTime.UtcNow;
-        var timeout = TimeSpan.FromSeconds(180);
         return rfScanInProgress = Task.Run(() =>
         {
             rfScanData.State = RFScanData.Status.Running;
@@ -533,56 +558,100 @@ public class ShureWirelessMic : IWirelessMic
             rfScanData.FrequencyRange = range;
             rfScanData.StepSize = stepSize;
             rfScanData.Samples = [];
-
-            receiver.Send($"* METER {receiverNo} ALL 400 *");
-            receiver.Send($"* SCAN RESERVE {receiverNo} xyz *");
-            // Wait for "* SCAN RESERVED n xyz *"
-            // Wait for "* SCAN RESERVE n ACK xyz *"
-            while (DateTime.UtcNow - startTime < timeout)
-            {
-                (string cmd, string args) cmd;
-                while (!scanCommands.TryDequeue(out cmd))
-                    scanCommandsSem.Wait(200);
-                if (cmd.cmd == "RESERVE" && cmd.args == "ACK xyz")
-                    break;
-            }
-            // Default step size is 25KHz
-            receiver.Send($"* SCAN RANGE {receiverNo} {stepSize/1000} {range.StartFrequency/1000} {range.EndFrequency/1000} *");
-            // Wait for "* SCAN STARTED n *"
-            // Wait for "* RFLEVEL n 10 578000 100 578025 100 578050 100 578075 100 578100 100 578125 100 578150 100 578175 100 578200 100 578225 100 *"
-            //           * RFLEVEL n numSamples [freq level]... *
-            // level: is in - dBm
-            // Wait for "* SCAN DONE n *"
-            while (DateTime.UtcNow - startTime < timeout)
-            {
-                (string cmd, string args) cmd;
-                while (!scanCommands.TryDequeue(out cmd))
-                    scanCommandsSem.Wait(200);
-                if (cmd.cmd == "DONE")
-                    break;
-            }
-            receiver.Send($"* SCAN RELEASE {receiverNo} *");
-            
-            // Wait for "* SCAN RELEASED n *"
-            // Wait for "* SCAN IDLE n *"
-            while (DateTime.UtcNow - startTime < timeout)
-            {
-                (string cmd, string args) cmd;
-                while (!scanCommands.TryDequeue(out cmd))
-                {
-                    receiver.Send($"* SCAN RELEASE {receiverNo} *");
-                    scanCommandsSem.Wait(200);
-                }
-                if (cmd.cmd == "RELEASED")
-                    break;
-            }
             scanCommands.Clear();
             for (int i = 0; i < scanCommandsSem.CurrentCount; i++)
                 scanCommandsSem.Wait(1);
+
+            bool reserved;
+            lock (receiver)
+            {
+                receiver.Send($"* METER {receiverNo} ALL 400 *");
+                receiver.Send($"* SCAN RESERVE {receiverNo} xyz *");
+                // Wait for "* SCAN RESERVED n xyz *"
+                // Wait for "* SCAN RESERVE n ACK xyz *"
+                //bool reserved = WaitForMessage("RESERVED", "xyz", TimeSpan.FromSeconds(2));
+                //reserved &= WaitForMessage("RESERVE", "ACK xyz", TimeSpan.FromSeconds(2));
+                reserved = WaitForMessage("RESERVE", "ACK xyz", TimeSpan.FromSeconds(10));
+            }
+            if (reserved)
+            {
+                receiver.Send($"* SCAN RANGE {receiverNo} {stepSize / 1000} {range.StartFrequency / 1000} {range.EndFrequency / 1000} *");
+                if (WaitForMessage("STARTED", null, TimeSpan.FromSeconds(2)))
+                {
+                    // Wait for "* SCAN STARTED n *"
+                    // Wait for "* RFLEVEL n 10 578000 100 578025 100 578050 100 578075 100 578100 100 578125 100 578150 100 578175 100 578200 100 578225 100 *"
+                    //           * RFLEVEL n numSamples [freq level]... *
+                    // level: is in - dBm
+                    // Wait for "* SCAN DONE n *"
+                    DateTime doneTime = DateTime.MinValue;
+                    bool done = WaitForMessage("DONE", null, TimeSpan.FromSeconds(120), () =>
+                    {
+                        // If the progress reaches 100% then cancel the wait after 3 seconds...
+                        if (rfScanData.Progress == 1)
+                        {
+                            if (doneTime == DateTime.MinValue)
+                                doneTime = DateTime.UtcNow;
+                            else if (DateTime.UtcNow - doneTime > TimeSpan.FromSeconds(3))
+                                return true;
+                        }
+
+                        return false;
+                    });
+                    receiver.Send($"* SCAN RELEASE {receiverNo} *");
+
+                    // Wait for "* SCAN RELEASED n *"
+                    // Wait for "* SCAN IDLE n *"
+                    done &= WaitForMessage("RELEASED", null, TimeSpan.FromSeconds(10), () =>
+                    {
+                        receiver.Send($"* SCAN RELEASE {receiverNo} *");
+                        return false;
+                    });
+                    done &= WaitForMessage("IDLE", null, TimeSpan.FromSeconds(10));
+
+                    if (done)
+                    {
+                        rfScanData.State = RFScanData.Status.Completed;
+                    }
+                    else
+                    {
+                        rfScanData.StatusMessage = $"RF scan on receiver 0x{UID:X8} terminated abnormally!";
+                        Log(rfScanData.StatusMessage, LogSeverity.Warning);
+                        rfScanData.State = RFScanData.Status.Failure;
+                    }
+                }
+                else
+                {
+                    rfScanData.StatusMessage = $"Failed to start RF scan on receiver 0x{UID:X8}!";
+                    Log(rfScanData.StatusMessage, LogSeverity.Warning);
+                    rfScanData.State = RFScanData.Status.Failure;
+                    receiver.Send($"* SCAN RELEASE {receiverNo} *");
+                }
+            }
+            else
+            {
+                if (WaitForMessage("IDLE", null, TimeSpan.FromSeconds(10)))
+                {
+                    rfScanData.StatusMessage = $"Failed to reserve receiver 0x{UID:X8} for RF scan!";
+                    Log(rfScanData.StatusMessage, LogSeverity.Warning);
+                    rfScanData.State = RFScanData.Status.Failure;
+                }
+                else
+                {
+                    rfScanData.StatusMessage = $"Failed to reserve receiver 0x{UID:X8} for RF scan!";
+                    Log(rfScanData.StatusMessage, LogSeverity.Warning);
+                    rfScanData.State = RFScanData.Status.Failure;
+                }
+            }
+
+            scanCommands.Clear();
+            for (int i = 0; i < scanCommandsSem.CurrentCount; i++)
+                scanCommandsSem.Wait(1);
+
             // Start metering again
             SendStartupCommands();
 
-            rfScanData.State = RFScanData.Status.Completed;
+            if (rfScanData.State != RFScanData.Status.Completed && rfScanData.State != RFScanData.Status.Failure)
+                rfScanData.State = RFScanData.Status.Failure;
 
             return rfScanData;
         });

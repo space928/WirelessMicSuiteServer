@@ -35,7 +35,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
     public int PollingPeriodMS { get; set; } = 100;
     public ObservableCollection<IWirelessMicReceiver> Receivers { get; init; }
 
-    public SennheiserSSCManager()
+    public SennheiserSSCManager(string? preferredNicAddress)
     {
         Receivers = [];
         receiversDict = [];
@@ -61,7 +61,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
         socket.Bind(new IPEndPoint(IPAddress.Any, 0));
         rxTask = Task.Run(RXTask);
         txTask = Task.Run(TXTask);
-        mDNSClient = new MDNSClient();
+        mDNSClient = new MDNSClient(preferredNicAddress);
         mDNSClient.OnMDNSMessage += OnMDNSMessage;
         discoveryTask = new Timer(_ =>
         {

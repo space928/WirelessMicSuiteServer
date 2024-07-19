@@ -30,7 +30,7 @@ public class MDNSClient : IDisposable
 
     public event Action<MDNSMessage>? OnMDNSMessage;
 
-    public MDNSClient()
+    public MDNSClient(string? preferredIp = null)
     {
         cancellationTokenSource = new();
         cancellationToken = cancellationTokenSource.Token;
@@ -50,11 +50,22 @@ public class MDNSClient : IDisposable
         Log("List network interfaces: ");
         List<IPAddress> addresses = [];
         IPAddress? addr = null;
+        IPAddress? prefferedIpAddr = null;
+        if (!string.IsNullOrEmpty(preferredIp))
+            if (!IPAddress.TryParse(preferredIp, out prefferedIpAddr))
+                Log($"Couldn't parse '{preferredIp}' as an IP address!", LogSeverity.Warning);
         foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
         {
-            var nicAddr = nic.GetIPProperties().UnicastAddresses.Select(x => x.Address);
+            var ipProps = nic.GetIPProperties();
+            var nicAddr = ipProps.UnicastAddresses.Select(x => x.Address);
             addresses.AddRange(nicAddr);
-            if (nicAddr.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork) is IPAddress naddr)
+            if (prefferedIpAddr != null && nicAddr.Contains(prefferedIpAddr))
+            {
+                addr = prefferedIpAddr;
+                break;
+            }
+            if (nicAddr.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork) is IPAddress naddr
+                && ipProps.GatewayAddresses.Count > 0)
                 addr ??= naddr;
             Log($"\t{nic.Name}: {string.Join(", ", nicAddr)}");
         }
