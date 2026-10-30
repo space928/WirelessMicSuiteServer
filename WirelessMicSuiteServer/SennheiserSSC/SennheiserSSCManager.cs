@@ -1,7 +1,8 @@
 ﻿using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
-using System.Net.Sockets;
+using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 namespace WirelessMicSuiteServer;
@@ -10,7 +11,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
 {
     private const int UdpPort = 45;
     private const int MaxUDPSize = 0x10000;
-    private const int ReceiverDisconnectTimeout = 5000;
+    private const int ReceiverDisconnectTimeout = 10000;
 
     private readonly Socket socket;
     private readonly Task rxTask;
@@ -24,7 +25,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
     private readonly CancellationToken cancellationToken;
     private readonly CancellationTokenSource cancellationTokenSource;
     private readonly ConcurrentDictionary<uint, SennheiserSSCReceiver> receiversDict;
-    private readonly Dictionary<uint, SennheiserSSCWirelessMic> micsDict;
+    private readonly ConcurrentDictionary<uint, SennheiserSSCWirelessMic> micsDict;
     private readonly ConcurrentDictionary<IPAddress, uint> receiverUIDs;
     private readonly ConcurrentQueue<ByteMessage> txPipe;
     private readonly SemaphoreSlim txAvailableSem;
@@ -63,18 +64,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
         txTask = Task.Run(TXTask);
         mDNSClient = new MDNSClient(preferredNicAddress);
         mDNSClient.OnMDNSMessage += OnMDNSMessage;
-        discoveryTask = new Timer(_ =>
-        {
-            try
-            {
-                mDNSClient.SendQuery(new DNSRecordMessage("_ssc._udp.local"));
-                DisconnectStaleDevices();
-            }
-            catch (Exception ex)
-            {
-                Log(ex.Message, LogSeverity.Warning);
-            }
-        }, null, 0, 1000);
+        discoveryTask = new Timer(DiscoveryTask, null, 0, 1000);
     }
 
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<SennheiserSSCManager>();
@@ -95,6 +85,19 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
         if (micsDict.TryGetValue(uid, out var mic))
             return mic;
         return null;
+    }
+
+    private void DiscoveryTask(object? state)
+    {
+        try
+        {
+            mDNSClient.SendQuery(new DNSRecordMessage("_ssc._udp.local"));
+            DisconnectStaleDevices();
+        }
+        catch (Exception ex)
+        {
+            Log(ex.Message, LogSeverity.Warning);
+        }
     }
 
     internal static uint CombineHash(uint a, uint b)
@@ -131,15 +134,19 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
                     if (t.StartsWith("id="))
                     {
                         id = ulong.Parse(t.AsSpan(3), System.Globalization.NumberStyles.HexNumber);
-                    } else if (t.StartsWith("model="))
+                    }
+                    else if (t.StartsWith("model="))
                     {
                         model = t[6..];
                     }
                 }
-            } else if (answer.type == DNSRecordType.A)
+                //Log($"[DBG] DNS_TXT ==> {string.Join(',', txt.txtData)}");
+            }
+            else if (answer.type == DNSRecordType.A)
             {
                 var a = (DNS_A)answer.record;
                 address = a.address;
+                //Log($"[DBG] DNS_A ==> {a.address}");
             }
         }
 
@@ -149,6 +156,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
             {
                 if (receiversDict.TryGetValue(uid, out var rec))
                     rec.LastPingTime = DateTime.UtcNow;
+                //Log($"[Ping  ] Sennheiser pinged @ {address} UID=0x{uid:X}");
             }
             else
             {
@@ -199,8 +207,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
                 }
                 catch (Exception ex)
                 {
-                    Log($"Exception while reading message '{str}'", LogSeverity.Warning);
-                    Log(ex.ToString(), LogSeverity.Warning);
+                    Log($"[{rec.Address.Address} 0x{rec.UID:X}] Exception while reading message '{str}'\n{ex}", LogSeverity.Warning);
                 }
             }
         }
@@ -245,7 +252,7 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
                     receiverUIDs.TryRemove(rec.Address.Address, out _);
                     Receivers.Remove(rec);
                     rec.Dispose();
-                    Log($"[Discovery] Receiver 0x{rec.UID:X} has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
+                    Log($"[Discovery] Receiver {rec.Address.Address} (ID: 0x{rec.UID:X}) has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
                 }
                 //receiversDict.TryRemove(rem, out _);
             }
@@ -263,12 +270,12 @@ public class SennheiserSSCManager : IWirelessMicReceiverManager
 
     internal void RegisterWirelessMic(SennheiserSSCWirelessMic mic)
     {
-        micsDict.Add(mic.UID, mic);
+        micsDict.TryAdd(mic.UID, mic);
     }
 
     internal void UnregisterWirelessMic(SennheiserSSCWirelessMic mic)
     {
-        micsDict.Remove(mic.UID);
+        micsDict.TryRemove(mic.UID, out _);
     }
 
     public void Dispose()

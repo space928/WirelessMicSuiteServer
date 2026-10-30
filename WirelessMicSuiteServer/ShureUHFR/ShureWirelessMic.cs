@@ -147,7 +147,7 @@ public class ShureWirelessMic : IWirelessMic
     private readonly ILogger logger = Program.LoggerFac.CreateLogger<ShureWirelessMic>();
     private void Log(string? message, LogSeverity severity = LogSeverity.Info)
     {
-        logger.Log(message, severity);
+        logger.Log($"[{receiver.Address.Address} 0x{receiver.UID:X}] {message}", severity);
     }
 
     public ShureWirelessMic(ShureUHFRReceiver receiver, uint uid, int receiverNo)

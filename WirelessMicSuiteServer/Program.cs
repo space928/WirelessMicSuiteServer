@@ -21,7 +21,7 @@ public class Program
 
         Log("Starting Wireless Mic Suite server...");
         var assembly = Assembly.GetExecutingAssembly();
-        string? copyright = string.IsNullOrEmpty(assembly.Location) ? "Copyright Thomas Mathieson 2024" : FileVersionInfo.GetVersionInfo(assembly.Location).LegalCopyright;
+        string? copyright = string.IsNullOrEmpty(assembly.Location) ? "Copyright Thomas Mathieson 2024-2026" : FileVersionInfo.GetVersionInfo(assembly.Location).LegalCopyright;
         Log($"Version: {assembly.GetName().Version}; {copyright}");
 
         int meterInterval = 50;

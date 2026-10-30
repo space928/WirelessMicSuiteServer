@@ -25,7 +25,7 @@ public class MDNSClient : IDisposable
     private readonly CancellationToken cancellationToken;
     private readonly CancellationTokenSource cancellationTokenSource;
     private readonly ConcurrentQueue<ByteMessage> txPipe;
-    private readonly ConcurrentDictionary<ushort, DateTime> activeQueries;
+    //private readonly ConcurrentDictionary<ushort, DateTime> activeQueries;
     private readonly SemaphoreSlim txAvailableSem;
 
     public event Action<MDNSMessage>? OnMDNSMessage;
@@ -36,7 +36,7 @@ public class MDNSClient : IDisposable
         cancellationToken = cancellationTokenSource.Token;
         txPipe = new();
         txAvailableSem = new(0);
-        activeQueries = [];
+        //activeQueries = [];
 
         Encoding encoding = Encoding.UTF8;
         buffer = new byte[MaxUDPSize];
@@ -58,6 +58,8 @@ public class MDNSClient : IDisposable
         {
             var ipProps = nic.GetIPProperties();
             var nicAddr = ipProps.UnicastAddresses.Select(x => x.Address);
+            if (!nicAddr.Any())
+                continue;
             addresses.AddRange(nicAddr);
             if (prefferedIpAddr != null && nicAddr.Contains(prefferedIpAddr))
             {
@@ -133,8 +135,8 @@ public class MDNSClient : IDisposable
         var header = new MDNSMessageHeader(buffSpan);
         int bytesRead = MDNSMessageHeader.HEADER_LENGTH;
 
-        if (!activeQueries.TryRemove(header.transactionID, out _))
-            return null;
+        //if (!activeQueries.TryRemove(header.transactionID, out _))
+        //    return null;
 
         DNSRecordMessage[] questions = new DNSRecordMessage[header.questionCount];
         DNSRecordMessage[] answers = new DNSRecordMessage[header.answerCount];
@@ -180,7 +182,7 @@ public class MDNSClient : IDisposable
     public void SendQuery(DNSRecordMessage query, ushort? transactionID = null)
     {
         transactionID ??= (ushort)(Random.Shared.Next() & ushort.MaxValue);
-        if (!activeQueries.TryAdd(transactionID.Value, DateTime.UtcNow))
+        /*if (!activeQueries.TryAdd(transactionID.Value, DateTime.UtcNow))
         {
             throw new ArgumentException($"Transaction ID {transactionID.Value} is still active and can't be reused.", nameof(transactionID));
         }
@@ -191,7 +193,7 @@ public class MDNSClient : IDisposable
             foreach (var kvp in activeQueries)
                 if (now - kvp.Value > timeout)
                     activeQueries.TryRemove(kvp.Key, out _);
-        }    
+        }  */  
 
         var header = new MDNSMessageHeader(transactionID.Value, MDNSFlags.None, 1, 0, 0, 0);
         int len = MDNSMessageHeader.HEADER_LENGTH + query.length;

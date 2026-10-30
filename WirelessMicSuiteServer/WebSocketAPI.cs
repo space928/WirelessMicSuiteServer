@@ -21,7 +21,7 @@ public class WebSocketAPI : IDisposable
     private readonly Task rxTask;
     private readonly Task txTask;
     private readonly CancellationToken cancellationToken;
-    private readonly CancellationTokenSource cancellationTokenSource;
+    private CancellationTokenSource? cancellationTokenSource;
     private readonly Decoder decoder;
     private readonly Encoder encoder;
     private readonly byte[] buffer;
@@ -34,7 +34,7 @@ public class WebSocketAPI : IDisposable
     public WebSocketAPI(WebSocket webSocket, TaskCompletionSource tcs, WebSocketAPIManager manager)
     {
         socket = webSocket;
-        cancellationTokenSource = new ();
+        cancellationTokenSource = new();
         cancellationToken = cancellationTokenSource.Token;
         txPipe = new();
         txAvailableSem = new(0);
@@ -65,11 +65,12 @@ public class WebSocketAPI : IDisposable
     {
         Log($"WebSocket API closed...");
         manager.UnregisterWebSocket(this);
-        cancellationTokenSource.Cancel();
+        cancellationTokenSource?.Cancel();
         await Task.WhenAll([rxTask, txTask]);
         rxTask.Dispose();
         txTask.Dispose();
-        cancellationTokenSource.Dispose();
+        cancellationTokenSource?.Dispose();
+        cancellationTokenSource = null;
         taskCompletion.TrySetResult();
     }
 
@@ -87,7 +88,7 @@ public class WebSocketAPI : IDisposable
                 }
                 if (res.CloseStatus != null)
                 {
-                    cancellationTokenSource.Cancel();
+                    cancellationTokenSource?.Cancel();
                     break;
                 }
                 if (res.MessageType != WebSocketMessageType.Text)
@@ -99,16 +100,17 @@ public class WebSocketAPI : IDisposable
                 int charsRead = decoder.GetChars(buffer, 0, res.Count, charBuffer, 0);
                 var str = charBuffer.AsMemory()[..charsRead];
                 Log($"Received: '{str}'", LogSeverity.Debug);
-            } catch
+            }
+            catch
             {
-                cancellationTokenSource.Cancel();
+                cancellationTokenSource?.Cancel();
                 break;
             }
         }
         taskCompletion.TrySetResult();
     }
 
-    private void TxTask() 
+    private void TxTask()
     {
         try
         {
@@ -120,9 +122,10 @@ public class WebSocketAPI : IDisposable
                 socket.SendAsync(msg, WebSocketMessageType.Text, true, cancellationToken)
                     .Wait();
             }
-        } catch
+        }
+        catch
         {
-            cancellationTokenSource.Cancel();
+            cancellationTokenSource?.Cancel();
         }
         taskCompletion.TrySetResult();
     }
@@ -143,12 +146,14 @@ public class WebSocketAPIManager : IDisposable
     private readonly WirelessMicManager micManager;
     private readonly List<WebSocketAPI> clients;
     private readonly Timer meteringTimer;
-    private bool isSendingMeteringMsg;
+    private volatile bool isSendingMeteringMsg;
     private readonly JsonSerializerOptions jsonSerializerOptions;
+    private readonly Lock clientListLock;
 
     public WebSocketAPIManager(WirelessMicManager micManager, int meterInterval)
     {
         this.micManager = micManager;
+        clientListLock = new();
         clients = [];
         propCache = [];
         BuildPropCache();
@@ -214,8 +219,11 @@ public class WebSocketAPIManager : IDisposable
                 .Select(x => new MeterInfoNotification(x.UID, x.LastMeterData!.Value));
             var json = JsonSerializer.SerializeToUtf8Bytes(meterData, jsonSerializerOptions);
 
-            foreach (var client in clients)
-                client.SendMessage(json);
+            lock (clientListLock)
+            {
+                foreach (var client in clients)
+                    client.SendMessage(json);
+            }
         }
         catch { }
         finally
@@ -250,7 +258,6 @@ public class WebSocketAPIManager : IDisposable
             if (!propCache.TryGetValue((typeof(IWirelessMic), args.PropertyName), out cached!))
                 return;
             uid = mic.UID;
-
         }
         else if (target is IWirelessMicReceiver rec)
         {
@@ -266,8 +273,11 @@ public class WebSocketAPIManager : IDisposable
         var propNotif = new PropertyChangeNotification(cached.name, val, uid);
         var json = JsonSerializer.SerializeToUtf8Bytes(propNotif, jsonSerializerOptions);
 
-        foreach (var client in clients)
-            client.SendMessage(json);
+        lock (clientListLock)
+        {
+            foreach (var client in clients)
+                client.SendMessage(json);
+        }
     }
 
     private void BuildPropCache()
@@ -305,7 +315,7 @@ public class WebSocketAPIManager : IDisposable
 
     public void RegisterWebSocket(WebSocketAPI webSocket)
     {
-        lock (clients)
+        lock (clientListLock)
         {
             clients.Add(webSocket);
         }
@@ -313,7 +323,7 @@ public class WebSocketAPIManager : IDisposable
 
     public void UnregisterWebSocket(WebSocketAPI webSocket)
     {
-        lock (clients)
+        lock (clientListLock)
         {
             clients.Remove(webSocket);
         }
@@ -321,7 +331,7 @@ public class WebSocketAPIManager : IDisposable
 
     public void Dispose()
     {
-        throw new NotImplementedException();
+
     }
 }
 

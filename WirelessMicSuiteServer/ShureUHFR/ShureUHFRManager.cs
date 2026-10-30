@@ -28,8 +28,8 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
     private readonly char[] charBuffer;
     private readonly CancellationToken cancellationToken;
     private readonly CancellationTokenSource cancellationTokenSource;
-    private readonly Dictionary<uint, ShureUHFRReceiver> receiversDict;
-    private readonly Dictionary<uint, ShureWirelessMic> micsDict;
+    private readonly ConcurrentDictionary<uint, ShureUHFRReceiver> receiversDict;
+    private readonly ConcurrentDictionary<uint, ShureWirelessMic> micsDict;
     private readonly ConcurrentQueue<ByteMessage> txPipe;
     private readonly SemaphoreSlim txAvailableSem;
 
@@ -128,38 +128,41 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
             ShureSNetHeader header = new(buffer);
             uint uid = ComputeReceiverUID(header.snetIDFrom);
 
+            /*if (header.type == ShureSNetHeader.SnetType.Discovery)
+            {
+                Log($"[Shure Discovery] From {header.snetIDFrom} --> {header.snetIDTo}     {((IPEndPoint)ep).Address} known={receiversDict.ContainsKey(uid)}");
+            }*/
+
             if (header.type == ShureSNetHeader.SnetType.Discovery && header.snetIDTo == 0xffffffff)
             {
                 var epIp = (IPEndPoint)ep;
                 epIp.Port = UdpPortPrivate;
 
-                lock (receiversDict)
+                if (receiversDict.TryGetValue(uid, out var receiver))
                 {
-                    if (receiversDict.TryGetValue(uid, out var receiver))
-                    {
-                        receiver.LastPingTime = DateTime.UtcNow;
-                    }
-                    else
-                    {
-                        Log($"[Discovery] Found Shure Receiver @ {epIp} UID=0x{uid:X}", LogSeverity.Info);
-                        receiver = new ShureUHFRReceiver(this, epIp, uid, header.snetIDFrom);
-                        receiversDict.Add(uid, receiver);
-                        Receivers.Add(receiver);
-                    }
+                    receiver.LastPingTime = DateTime.UtcNow;
+                }
+                else
+                {
+                    Log($"[Discovery] Found Shure Receiver @ {epIp} UID=0x{uid:X}", LogSeverity.Info);
+                    receiver = new ShureUHFRReceiver(this, epIp, uid, header.snetIDFrom);
+                    receiversDict.TryAdd(uid, receiver);
+                    Receivers.Add(receiver);
                 }
                 continue;
-            } else if (header.type == ShureSNetHeader.SnetType.Special)
+            }
+            else if (header.type == ShureSNetHeader.SnetType.Special)
             {
                 // string bmsg = string.Join(" ", buffer[ShureSNetHeader.HEADER_SIZE..read].Select(x => x.ToString("X2")));
                 // Log($"Received special message: '{bmsg}'", LogSeverity.Info);
                 continue;
             }
 
-            int charsRead = decoder.GetChars(buffer, ShureSNetHeader.HEADER_SIZE, read-ShureSNetHeader.HEADER_SIZE, charBuffer, 0);
+            int charsRead = decoder.GetChars(buffer, ShureSNetHeader.HEADER_SIZE, read - ShureSNetHeader.HEADER_SIZE, charBuffer, 0);
             Span<char> str = charBuffer.AsSpan()[..charsRead];
             Log($"Received: '{str}'", LogSeverity.Debug);
 
-            if(receiversDict.TryGetValue(uid, out var rec))
+            if (receiversDict.TryGetValue(uid, out var rec))
                 rec.Receive(str, header);
         }
     }
@@ -175,7 +178,8 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
             {
                 socket.SendTo(msg.Buffer, msg.endPoint);
                 msg.Dispose();
-            } catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Log($"Error while sending message: {ex.Message}!", LogSeverity.Warning);
             }
@@ -190,29 +194,27 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
         List<uint> toRemove = [];
         while (!cancellationToken.IsCancellationRequested)
         {
-            lock (receiversDict)
+            foreach (var rec in receiversDict.Values)
             {
-                foreach (var rec in receiversDict.Values)
+                rec.SendDiscoveryMsg();
+                var dt = DateTime.UtcNow - rec.LastPingTime;
+                if (dt > TimeSpan.FromMilliseconds(ReceiverDisconnectTimeout))
+                    toRemove.Add(rec.UID);
+            }
+            if (toRemove.Count > 0)
+            {
+                foreach (var rem in toRemove)
                 {
-                    rec.SendDiscoveryMsg();
-                    var dt = DateTime.UtcNow - rec.LastPingTime;
-                    if (dt > TimeSpan.FromMilliseconds(ReceiverDisconnectTimeout))
-                        toRemove.Add(rec.UID);
-                }
-                if (toRemove.Count > 0)
-                {
-                    foreach (var rem in toRemove)
+                    if (receiversDict.TryGetValue(rem, out var rec))
                     {
-                        if (receiversDict.TryGetValue(rem, out var rec))
-                        {
-                            Receivers.Remove(rec);
-                            rec.Dispose();
-                            Log($"[Discovery] Receiver 0x{rec.UID:X} has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
-                        }
-                        receiversDict.Remove(rem);
+                        Receivers.Remove(rec);
+                        rec.Dispose();
+                        Log($"[Discovery] Receiver {rec.Address.Address} (ID: 0x{rec.UID:X}) has not pinged in {ReceiverDisconnectTimeout} ms, marking as disconnected!");
                     }
-                    toRemove.Clear();
+                    receiversDict.TryRemove(rem, out var old);
+                    old?.Dispose();
                 }
+                toRemove.Clear();
             }
             Thread.Sleep(500);
         }
@@ -228,12 +230,12 @@ public class ShureUHFRManager : IWirelessMicReceiverManager
 
     internal void RegisterWirelessMic(ShureWirelessMic mic)
     {
-        micsDict.Add(mic.UID, mic);
+        micsDict.TryAdd(mic.UID, mic);
     }
 
     internal void UnregisterWirelessMic(ShureWirelessMic mic)
     {
-        micsDict.Remove(mic.UID);
+        micsDict.TryRemove(mic.UID, out var old);
     }
 
     public void Dispose()

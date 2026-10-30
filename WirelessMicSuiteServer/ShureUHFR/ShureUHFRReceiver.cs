@@ -38,11 +38,8 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     public string? FirmwareVersion => firmwareVersion;
     public IPv4Address IPAddress
     {
-        get => ipAddress;
-        set
-        {
-            SetAsync("IP_ADDR", value.ToString());
-        }
+        get => ipAddress; 
+        set => SetAsync("IP_ADDR", value.ToString());
     }
     public IPv4Address? Subnet
     {
@@ -93,7 +90,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
         this.snetID = snetID;
         Address = new(address.Address, address.Port);
         mics = [
-            new ShureWirelessMic(this, ShureUHFRManager.CombineHash(uid, 1u), 1), 
+            new ShureWirelessMic(this, ShureUHFRManager.CombineHash(uid, 1u), 1),
             new ShureWirelessMic(this, ShureUHFRManager.CombineHash(uid, 2u), 2)
         ];
         manager.RegisterWirelessMic(mics[0]);
@@ -108,13 +105,13 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
     {
 #if DEBUG
         if (severity == LogSeverity.Warning || severity == LogSeverity.Error)
-        { 
+        {
         }
 #endif
-        logger.Log(message, severity);
+        logger.Log($"[{Address.Address} 0x{UID:X}] {message}", severity);
     }
 
-    public void Dispose() 
+    public void Dispose()
     {
         manager.UnregisterWirelessMic(mics[0]);
         manager.UnregisterWirelessMic(mics[1]);
@@ -261,7 +258,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
         int note = -1;
         if (type == ShureCommandType.NOTE)
         {
-            int noteEnd = msg[1..].IndexOf(' ')+1;
+            int noteEnd = msg[1..].IndexOf(' ') + 1;
             if (!int.TryParse(msg[1..noteEnd], out note))
             {
                 Log($"Error parsing note number in '{fullMsg}'", LogSeverity.Warning);
@@ -368,7 +365,7 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
                         ];
                         OnPropertyChanged(nameof(FrequencyRanges));
                     }
-                    catch 
+                    catch
                     {
                         CommandError(fullMsg, "Expected 4 uints for band limits!");
                         return;
@@ -384,7 +381,8 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
                 {
                     macAddress = new MACAddress(args);
                     OnPropertyChanged(nameof(MACAddress));
-                } catch
+                }
+                catch
                 {
                     CommandError(fullMsg, "Expected a MAC address in the form aa:bb:cc:dd:ee:ff!");
                     return;
@@ -395,11 +393,13 @@ public class ShureUHFRReceiver : IWirelessMicReceiver
                 {
                     ipMode = WirelessMicSuiteServer.IPMode.DHCP;
                     OnPropertyChanged(nameof(IPMode));
-                } else if (args.SequenceEqual("Manual"))
+                }
+                else if (args.SequenceEqual("MANUAL"))
                 {
                     ipMode = WirelessMicSuiteServer.IPMode.Manual;
                     OnPropertyChanged(nameof(IPMode));
-                } else
+                }
+                else
                 {
                     CommandError(fullMsg);
                     return;
